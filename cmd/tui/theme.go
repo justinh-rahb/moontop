@@ -1,0 +1,66 @@
+package main
+
+import "github.com/charmbracelet/lipgloss"
+
+// ---------------------------------------------------------------------------
+// Color palette
+//
+// Centralized so future theming/configurability has a single source of
+// truth. Numeric ANSI 256 codes — picked to work on dark terminals.
+// ---------------------------------------------------------------------------
+
+var (
+	colorBorderBlurred = lipgloss.Color("63")  // dim blue
+	colorBorderFocused = lipgloss.Color("205") // hot pink
+	colorTitle         = lipgloss.Color("229") // pale yellow
+	colorTextMuted     = lipgloss.Color("241") // gray
+	colorAccentWarm    = lipgloss.Color("214") // amber
+	colorAccentCool    = lipgloss.Color("205") // pink (same as focus)
+	colorErr           = lipgloss.Color("203") // red
+)
+
+// ---------------------------------------------------------------------------
+// Reusable styles
+//
+// All panes use panelStyle/panelTitleStyle for their chrome — no more
+// per-pane ad hoc borders. Focus is communicated by swapping the border
+// foreground (see renderPanel in layout.go).
+// ---------------------------------------------------------------------------
+
+var (
+	panelStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorBorderBlurred).
+			Padding(0, 1)
+
+	panelTitleStyle = lipgloss.NewStyle().
+			Foreground(colorTextMuted).
+			Bold(true)
+
+	panelTitleFocusedStyle = panelTitleStyle.
+				Foreground(colorBorderFocused)
+
+	appTitleStyle = lipgloss.NewStyle().
+			Foreground(colorTitle).
+			Bold(true).
+			MarginLeft(1)
+
+	footerStyle = lipgloss.NewStyle().
+			Foreground(colorTextMuted).
+			MarginLeft(1)
+
+	footerFocusStyle = lipgloss.NewStyle().
+				Foreground(colorTitle).
+				Bold(true)
+
+	bodyStyle = lipgloss.NewStyle().MarginLeft(1)
+
+	// Pane-internal accents (kept in theme.go so all colors are
+	// findable in one place).
+	jogPosStyle  = lipgloss.NewStyle().Foreground(colorTitle).Bold(true)
+	jogPadStyle  = lipgloss.NewStyle().Foreground(colorAccentCool)
+	jogStepStyle = lipgloss.NewStyle().Foreground(colorAccentWarm)
+	jogHintStyle = lipgloss.NewStyle().Foreground(colorTextMuted)
+
+	errStyle = lipgloss.NewStyle().Foreground(colorErr).Bold(true)
+)

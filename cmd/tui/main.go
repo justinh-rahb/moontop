@@ -131,11 +131,8 @@ type model struct {
 	width  int
 	height int
 
-	// Computed in resizeLayout, consumed by View.
-	jogPaneW    int
-	topRowH     int
-	tableBoxW   int
-	consoleBoxW int
+	// Computed once per resize (see resizeLayout), consumed by View.
+	layout layout
 
 	ready bool
 	err   error
@@ -483,37 +480,21 @@ func (m *model) buildTable() {
 	m.table = t
 }
 
-// resizeLayout recomputes pane dimensions from the current window size.
-//
-// Top row hugs its content height (one box-row per sensor + header),
-// so the temperature pane never has a sea of blank rows below the data;
-// the console pane gets all remaining vertical space.
+// resizeLayout recomputes pane dimensions from the current window size
+// and applies them to the sub-models that need explicit sizing
+// (bubbles/table columns + height, viewport, textinput). Pure layout
+// math lives in computeLayout (layout.go); this is the imperative
+// "tell each widget how big it is" step.
 func (m *model) resizeLayout() {
-	const (
-		titleH = 2 // title + blank line
-		helpH  = 2
-		boxV   = 2 // border top + bottom (per box, no padding rows)
-		bodyMl = 1 // bodyStyle left margin
-	)
-
-	totalW := m.width - bodyMl - 1 // -1 right gutter
-	if totalW < 60 {
-		totalW = 60
+	m.layout = computeLayout(m.width, m.height, len(m.sensorNames))
+	if m.layout.mode == layoutMinimal {
+		return
 	}
 
-	// Jog pane: just wide enough for its hint text, no more.
-	jogW := 26
-	if jogW > totalW/3 {
-		jogW = totalW / 3
-	}
-	tableBoxW := totalW - jogW
-	if tableBoxW < 44 {
-		tableBoxW = 44
-	}
-
-	// Table content area inside its box = boxW - 2*padding(1) - 2*border(1).
-	tableContentW := tableBoxW - 4
-	nameW := tableContentW - 30 // 10 each for State/Current/Target
+	// Reserve 8 cols for bubbles/table's internal cell padding (1 char
+	// each side × 4 columns) so the Target header doesn't wrap.
+	const cellPadTotal = 8
+	nameW := m.layout.tableContentW - cellPadTotal - 30
 	if nameW < 12 {
 		nameW = 12
 	}
@@ -524,44 +505,26 @@ func (m *model) resizeLayout() {
 		{Title: "Target", Width: 10},
 	})
 
-	// Hug content: one row per sensor. Header is drawn by SetStyles
-	// separately, so SetHeight only counts data rows.
-	tableH := len(m.sensorNames)
-	if tableH < 1 {
-		tableH = 1
+	// Data rows inside the table widget: outer pane height - title(1)
+	// - table-header(1) - borders(2).
+	var paneH int
+	switch m.layout.mode {
+	case layoutWide:
+		paneH = m.layout.topRowH
+	default:
+		paneH = m.layout.tableH
 	}
-	m.table.SetHeight(tableH)
-
-	// Outer top-row height = max of what the table wants (data rows +
-	// header + borders) and what the jog pane needs to render fully.
-	const jogContentMin = 13 // see renderJog
-	tableOuter := tableH + 1 + boxV
-	jogOuter := jogContentMin + boxV
-	topRowH := tableOuter
-	if jogOuter > topRowH {
-		topRowH = jogOuter
+	rowH := paneH - 4
+	if rowH < 1 {
+		rowH = 1
 	}
-	// Re-stretch the table's data rows so it fills the agreed height.
-	m.table.SetHeight(topRowH - 1 - boxV)
+	m.table.SetHeight(rowH)
 
-	// Total rendered lines = title(1) + sep(1) + topRowH +
-	//   consoleBoxOuter(consoleH+1+2) + sep(1) + help(1) + trail(1).
-	// → consoleH = m.height - topRowH - 8
-	consoleH := m.height - topRowH - 8
-	if consoleH < 3 {
-		consoleH = 3
-	}
-
-	m.viewport.Width = totalW - 4
-	m.viewport.Height = consoleH
+	m.viewport.Width = m.layout.consoleBoxW - panelInnerXReserve()
+	m.viewport.Height = m.layout.consoleViewportH
 	m.viewport.SetContent(strings.Join(m.logLines, "\n"))
 	m.viewport.GotoBottom()
-	m.input.Width = totalW - 6
-
-	m.jogPaneW = jogW
-	m.topRowH = topRowH
-	m.tableBoxW = tableBoxW
-	m.consoleBoxW = totalW
+	m.input.Width = m.layout.inputW
 }
 
 func (m *model) rebuildRows() {
@@ -613,89 +576,80 @@ func friendlyName(name string) string {
 // View
 // ---------------------------------------------------------------------------
 
-var (
-	boxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("63")).
-			Padding(0, 1)
-
-	focusedBoxStyle = boxStyle.
-			BorderForeground(lipgloss.Color("205"))
-
-	titleStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("229")).
-			Bold(true).
-			MarginLeft(1)
-
-	helpStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241")).
-			MarginLeft(1)
-
-	bodyStyle = lipgloss.NewStyle().MarginLeft(1)
-
-	jogPosStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("229")).
-			Bold(true)
-
-	jogPadStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("205"))
-
-	jogStepStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("214"))
-
-	jogHintStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("241"))
-)
-
 func (m model) View() string {
 	if m.err != nil {
-		return fmt.Sprintf("\n  Error: %v\n\n  Press q to quit.\n", m.err)
+		return errStyle.Render(fmt.Sprintf("\n  Error: %v\n\n", m.err)) +
+			footerStyle.Render("  Press ctrl+c to quit.\n")
 	}
 	if !m.ready {
 		return "\n  Connecting…\n"
 	}
-
-	pick := func(f focusArea) lipgloss.Style {
-		if m.focus == f {
-			return focusedBoxStyle
-		}
-		return boxStyle
+	if m.layout.mode == layoutMinimal {
+		return renderMinimal(m.width, m.height)
 	}
 
-	// Outer dims include border + padding; content area = W-4, H-2.
-	tablePane := pick(focusTable).
-		Width(m.tableBoxW).
-		Height(m.topRowH).
-		Render(m.table.View())
-
-	jogPane := pick(focusJog).
-		Width(m.jogPaneW).
-		Height(m.topRowH).
-		Render(m.renderJog())
-
-	topRow := lipgloss.JoinHorizontal(lipgloss.Top, tablePane, jogPane)
-
-	bottom := pick(focusConsole).
-		Width(m.consoleBoxW).
-		Render(m.viewport.View() + "\n" + m.input.View())
-
-	body := bodyStyle.Render(
-		lipgloss.JoinVertical(lipgloss.Left, topRow, bottom),
+	tablePane := renderPanel(
+		"Temperatures",
+		m.table.View(),
+		m.focus == focusTable,
+		m.layout.tableBoxW,
+		paneHeight(m.layout, focusTable),
+	)
+	jogPane := renderPanel(
+		"Toolhead",
+		m.renderJog(),
+		m.focus == focusJog,
+		m.layout.jogBoxW,
+		paneHeight(m.layout, focusJog),
+	)
+	consolePane := renderPanel(
+		"Console",
+		m.viewport.View()+"\n"+m.input.View(),
+		m.focus == focusConsole,
+		m.layout.consoleBoxW,
+		0, // auto-size to content
 	)
 
-	title := titleStyle.Render("🌡 Moonraker")
-	help := helpStyle.Render(
-		"tab: switch focus  •  ctrl+c: quit  •  q: quit (when console not focused)",
-	)
+	var stacked string
+	switch m.layout.mode {
+	case layoutWide:
+		top := lipgloss.JoinHorizontal(lipgloss.Top, tablePane, jogPane)
+		stacked = lipgloss.JoinVertical(lipgloss.Left, top, consolePane)
+	default: // stacked
+		stacked = lipgloss.JoinVertical(lipgloss.Left, tablePane, jogPane, consolePane)
+	}
+	body := bodyStyle.Render(stacked)
 
-	return title + "\n" + body + "\n" + help + "\n"
+	title := appTitleStyle.Render("🌡 Moonraker")
+	footer := renderFooter(m.focus)
+
+	return title + "\n" + body + "\n" + footer + "\n"
+}
+
+// paneHeight returns the outer height for a given pane in the current
+// layout — wide mode shares one top-row height, stacked mode has
+// per-pane heights.
+func paneHeight(l layout, f focusArea) int {
+	if l.mode == layoutWide {
+		if f == focusTable || f == focusJog {
+			return l.topRowH
+		}
+		return 0
+	}
+	switch f {
+	case focusTable:
+		return l.tableH
+	case focusJog:
+		return l.jogH
+	}
+	return 0
 }
 
 // renderJog produces the contents of the jog pane: an XY directional
 // pad, Z controls, the active step size, and the current toolhead
-// position. Laid out visually rather than as a hint dump.
+// position.
 func (m model) renderJog() string {
-	contentW := m.jogPaneW - 4 // box has 1 padding + 1 border per side
+	contentW := m.layout.jogBoxW - panelInnerXReserve()
 	if contentW < 16 {
 		contentW = 16
 	}
