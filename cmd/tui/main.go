@@ -302,7 +302,7 @@ func initialModel(client *moonraker.Client) model {
 		files:        files,
 		progress:     prog,
 		tuningInputs: tuningInputs,
-		focus:        focusTable,
+		focus:        focusFiles,
 		stepIndex:    2, // 10 mm
 		job:          printJob{State: "standby"},
 	}
@@ -709,24 +709,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) toggleFocus() {
-	// table → jog → console → files → tuning → table …
+	// Tab cycle matches the visual order: files → jog → tuning → table → console → files …
 	// Confirmation is now global (not files-pane-scoped), so Tab no
 	// longer needs to clear it — it survives focus changes intentionally.
 	leaving := m.focus
 	switch m.focus {
-	case focusTable:
+	case focusFiles:
 		m.focus = focusJog
 	case focusJog:
+		m.focus = focusTuning
+		m.setInnerFocus(0)
+	case focusTuning:
+		m.focus = focusTable
+	case focusTable:
 		m.focus = focusConsole
 		m.input.Focus()
 	case focusConsole:
 		m.focus = focusFiles
 		m.input.Blur()
-	case focusFiles:
-		m.focus = focusTuning
-		m.setInnerFocus(0)
-	case focusTuning:
-		m.focus = focusTable
 	}
 	// Leaving the tuning pane: blur the active textinput so its cursor
 	// stops blinking elsewhere on screen.
@@ -1237,10 +1237,10 @@ func (m model) View() string {
 	var stacked string
 	switch m.layout.mode {
 	case layoutWide:
-		top := lipgloss.JoinHorizontal(lipgloss.Top, tablePane, jogPane, tuningPane, filesPane)
+		top := lipgloss.JoinHorizontal(lipgloss.Top, filesPane, jogPane, tuningPane, tablePane)
 		stacked = lipgloss.JoinVertical(lipgloss.Left, top, consolePane)
 	default: // stacked
-		stacked = lipgloss.JoinVertical(lipgloss.Left, tablePane, jogPane, tuningPane, filesPane, consolePane)
+		stacked = lipgloss.JoinVertical(lipgloss.Left, filesPane, jogPane, tuningPane, tablePane, consolePane)
 	}
 	body := bodyStyle.Render(stacked)
 
