@@ -43,17 +43,17 @@ var (
 	appTitleStyle = lipgloss.NewStyle().
 			Foreground(colorTitle).
 			Bold(true).
-			MarginLeft(1)
+			MarginLeft(2)
 
 	footerStyle = lipgloss.NewStyle().
 			Foreground(colorTextMuted).
-			MarginLeft(1)
+			MarginLeft(2)
 
 	footerFocusStyle = lipgloss.NewStyle().
 				Foreground(colorTitle).
 				Bold(true)
 
-	bodyStyle = lipgloss.NewStyle().MarginLeft(1)
+	bodyStyle = lipgloss.NewStyle().MarginLeft(2)
 
 	// Pane-internal accents (kept in theme.go so all colors are
 	// findable in one place).

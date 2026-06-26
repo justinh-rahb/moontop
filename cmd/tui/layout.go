@@ -89,8 +89,8 @@ func computeLayout(termW, termH, sensorCount int) layout {
 	// 1 left margin + 3 right gutter columns.
 	const (
 		chromeV = 5 // title + sep + sep + footer + trailing-line safety
-		marginL = 1
-		gutterR = 3
+		marginL = 2
+		gutterR = 4
 	)
 
 	availW := termW - marginL - gutterR
@@ -240,10 +240,26 @@ func panelInnerXReserve() int {
 // same focus-color swap. Body text is rendered as-is inside.
 // ---------------------------------------------------------------------------
 
+// renderPanel produces a bordered, titled box of exactly outerW x outerH
+// rendered columns/rows.
+//
+// IMPORTANT: lipgloss Width/Height set the *content area* (padding
+// included, borders not). To make the rendered output exactly outerW
+// wide, subtract 2 for the left+right border. Same for height with the
+// top+bottom border. Getting this off-by-2 is what made the rightmost
+// pane overflow into the terminal's right edge before.
 func renderPanel(title, body string, focused bool, outerW, outerH int) string {
-	style := panelStyle.Width(outerW)
+	innerW := outerW - 2
+	if innerW < 1 {
+		innerW = 1
+	}
+	style := panelStyle.Width(innerW)
 	if outerH > 0 {
-		style = style.Height(outerH)
+		innerH := outerH - 2
+		if innerH < 1 {
+			innerH = 1
+		}
+		style = style.Height(innerH)
 	}
 	titleStyle := panelTitleStyle
 	if focused {
@@ -287,7 +303,7 @@ func renderFooter(f focusArea, job printJob, confirming bool) string {
 	mid := footerStyle.Render("  " + paneKeys)
 	jobText := footerStyle.Render("  •  " + describeJob(job))
 	right := footerStyle.Render("  •  tab: next pane  •  ctrl+c: quit")
-	return lipgloss.NewStyle().MarginLeft(1).Render(left + mid + jobText + right)
+	return lipgloss.NewStyle().MarginLeft(2).Render(left + mid + jobText + right)
 }
 
 // describeJob renders the print_stats summary shown in the footer.
