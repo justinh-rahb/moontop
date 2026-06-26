@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -121,12 +122,13 @@ type printStartedMsg struct {
 	err      error
 }
 
-// printJob mirrors the subset of print_stats we care about for the
-// footer/job-status display.
+// printJob mirrors the subset of print_stats / virtual_sdcard we care
+// about for the footer / progress display.
 type printJob struct {
 	State    string // "standby" | "printing" | "paused" | "complete" | "error" | "cancelled"
 	Filename string
 	Duration float64 // seconds of active print time
+	Progress float64 // 0.0 - 1.0 (from virtual_sdcard)
 }
 
 type errMsg struct{ err error }
@@ -197,6 +199,7 @@ type model struct {
 	viewport viewport.Model
 	input    textinput.Model
 	files    list.Model
+	progress progress.Model
 
 	// Tuning pane: one textinput per editable field, plus inner-focus
 	// index and per-field dirty bits.
@@ -269,6 +272,10 @@ func initialModel(client *moonraker.Client) model {
 	files.SetShowHelp(false)
 	files.SetFilteringEnabled(true)
 
+	prog := progress.New(progress.WithDefaultGradient())
+	prog.ShowPercentage = false // we render percentage ourselves alongside ETA
+	prog.Width = 24
+
 	var tuningInputs [tuningFieldCount]textinput.Model
 	for i := range tuningInputs {
 		ti := textinput.New()
@@ -284,6 +291,7 @@ func initialModel(client *moonraker.Client) model {
 		viewport:     vp,
 		input:        ti,
 		files:        files,
+		progress:     prog,
 		tuningInputs: tuningInputs,
 		focus:        focusTable,
 		stepIndex:    2, // 10 mm
@@ -389,6 +397,7 @@ func (m model) initialize() tea.Cmd {
 			"square_corner_velocity", "minimum_cruise_ratio",
 		}
 		subMap["print_stats"] = []string{"state", "filename", "print_duration"}
+		subMap["virtual_sdcard"] = []string{"progress"}
 
 		initial, err := m.client.Subscribe(subMap)
 		if err != nil {
@@ -503,6 +512,12 @@ func mergeStatus(
 			if v, ok := fields["print_duration"]; ok {
 				if f, ok := v.(float64); ok {
 					job.Duration = f
+				}
+			}
+		case name == "virtual_sdcard":
+			if v, ok := fields["progress"]; ok {
+				if f, ok := v.(float64); ok {
+					job.Progress = f
 				}
 			}
 		default:
@@ -622,7 +637,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mergeStatus(m.sensors, &m.position, &m.job, &m.limits, msg.Objects)
 		m.rebuildRows()
 		m.refreshTuningInputs()
-		return m, m.listenUpdates()
+		// Drive the progress bar's animation toward the new live
+		// percent. SetPercent returns a tea.Cmd that emits FrameMsgs
+		// until the bar reaches the target — we batch it alongside
+		// the next listenUpdates Cmd so neither blocks the other.
+		var animCmd tea.Cmd
+		if m.job.State == "printing" {
+			animCmd = m.progress.SetPercent(m.job.Progress)
+		} else {
+			// Snap to 0 between prints so the next print starts at 0,
+			// not wherever the bar left off.
+			animCmd = m.progress.SetPercent(0)
+		}
+		return m, tea.Batch(m.listenUpdates(), animCmd)
+
+	case progress.FrameMsg:
+		pm, cmd := m.progress.Update(msg)
+		m.progress = pm.(progress.Model)
+		return m, cmd
 
 	case gcodeRespMsg:
 		m.appendLog(string(msg))
@@ -1142,7 +1174,11 @@ func (m model) View() string {
 	body := bodyStyle.Render(stacked)
 
 	title := appTitleStyle.Render("🌡 Moonraker")
-	footer := renderFooter(m.focus, m.job)
+	var barView string
+	if m.job.State == "printing" {
+		barView = m.progress.View()
+	}
+	footer := renderFooter(m.focus, m.job, barView)
 
 	out := title + "\n" + body + "\n"
 	if m.confirmation != nil {

@@ -290,7 +290,7 @@ func renderPanel(title, body string, focused bool, outerW, outerH int) string {
 // always-on global ones.
 // ---------------------------------------------------------------------------
 
-func renderFooter(f focusArea, job printJob) string {
+func renderFooter(f focusArea, job printJob, barView string) string {
 	var paneName, paneKeys string
 	switch f {
 	case focusTable:
@@ -311,7 +311,7 @@ func renderFooter(f focusArea, job printJob) string {
 	}
 	left := footerFocusStyle.Render(paneName)
 	mid := footerStyle.Render("  " + paneKeys)
-	jobText := footerStyle.Render("  •  " + describeJob(job))
+	jobText := renderJobSummary(job, barView)
 	jobKeys := footerStyle.Render(jobControlHints(job))
 	right := footerStyle.Render("  •  tab: next pane  •  ctrl+c: quit")
 	return lipgloss.NewStyle().MarginLeft(2).Render(left + mid + jobText + jobKeys + right)
@@ -341,24 +341,50 @@ func renderConfirmation(prompt string) string {
 	return lipgloss.NewStyle().MarginLeft(2).Render(q + hint)
 }
 
-// describeJob renders the print_stats summary shown in the footer.
-// Kept here (rather than in main.go) so the footer's content is in one
-// place — formatting tweaks don't require touching the model.
-func describeJob(job printJob) string {
+// renderJobSummary renders the printer-state summary shown in the
+// footer. Only the "printing" state embeds the live progress bar +
+// percentage + ETA; every other state is a plain status string,
+// matching Phase 8's "footer text state is enough" treatment.
+//
+// The bar widget itself lives on the model (it has animation state),
+// so the caller renders its View() and passes the result here as
+// barView — that way layout.go stays free of the bubbles/progress
+// dependency.
+func renderJobSummary(job printJob, barView string) string {
+	bullet := footerStyle.Render("  •  ")
 	switch job.State {
 	case "printing":
-		return fmt.Sprintf("Printing: %s (%s)", job.Filename, formatDuration(job.Duration))
+		pct := fmt.Sprintf("%d%%", int(job.Progress*100+0.5))
+		eta := formatETA(job.Duration, job.Progress)
+		head := footerStyle.Render(fmt.Sprintf("Printing: %s  ", job.Filename))
+		tail := footerStyle.Render(fmt.Sprintf("  %s  ETA %s", pct, eta))
+		return bullet + head + barView + tail
 	case "paused":
-		return fmt.Sprintf("Paused: %s", job.Filename)
+		return bullet + footerStyle.Render(fmt.Sprintf("Paused: %s", job.Filename))
 	case "complete":
-		return fmt.Sprintf("Complete: %s", job.Filename)
+		return bullet + footerStyle.Render(fmt.Sprintf("Complete: %s", job.Filename))
 	case "error":
-		return fmt.Sprintf("Error: %s", job.Filename)
+		return bullet + footerStyle.Render(fmt.Sprintf("Error: %s", job.Filename))
 	case "cancelled":
-		return fmt.Sprintf("Cancelled: %s", job.Filename)
+		return bullet + footerStyle.Render(fmt.Sprintf("Cancelled: %s", job.Filename))
 	default:
-		return "Standby"
+		return bullet + footerStyle.Render("Standby")
 	}
+}
+
+// formatETA derives time-remaining from elapsed seconds and current
+// progress (0-1). Returns "calculating…" for the first slice of a
+// print where progress hasn't moved off zero — divide-by-zero guard.
+func formatETA(elapsedSec, progress float64) string {
+	if progress < 0.01 {
+		return "calculating…"
+	}
+	total := elapsedSec / progress
+	remaining := total - elapsedSec
+	if remaining < 0 {
+		remaining = 0
+	}
+	return formatDuration(remaining)
 }
 
 func formatDuration(secs float64) string {
