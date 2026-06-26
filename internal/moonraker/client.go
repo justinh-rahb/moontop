@@ -7,6 +7,7 @@
 package moonraker
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -70,55 +71,119 @@ type StatusUpdate struct {
 // ---------------------------------------------------------------------------
 
 // Client manages a WebSocket connection to a Moonraker instance.
+//
+// Channel lifecycle across reconnect:
+//
+//   - updates, gcodeResponses, disconnected are created once in New()
+//     and survive Reconnect(). Long-lived consumer goroutines do NOT
+//     need to be re-issued after a reconnect — they remain blocked on
+//     these channels and naturally resume reading once a fresh
+//     readLoop starts pushing data.
+//
+//   - The underlying *websocket.Conn IS replaced on Reconnect. Each
+//     readLoop goroutine captures its own conn at start, so an old
+//     readLoop exits cleanly without racing against the new one.
+//
+//   - Pending RPC response channels are closed when the readLoop
+//     exits on a connection error, so any blocked call() returns
+//     promptly with an error rather than hanging forever.
 type Client struct {
-	conn *websocket.Conn
 	host string
 
 	// Auto-incrementing request ID.
 	nextID atomic.Int64
 
-	// Serializes WriteMessage calls — gorilla/websocket allows only
-	// one concurrent writer per connection and panics otherwise.
+	// Serializes WriteMessage calls AND swaps of c.conn — gorilla/
+	// websocket panics on concurrent writes, so the same lock that
+	// guards writes also protects the conn pointer being replaced
+	// out from under an in-flight write.
 	writeMu sync.Mutex
+	conn    *websocket.Conn
 
 	// Pending requests awaiting a response, keyed by request ID.
-	mu       sync.Mutex
-	pending  map[int64]chan *rpcResponse
+	mu      sync.Mutex
+	pending map[int64]chan *rpcResponse
 
-	// Notification channels exposed to consumers.
-	updates       chan StatusUpdate
+	// Notification channels exposed to consumers. Survive reconnect.
+	updates        chan StatusUpdate
 	gcodeResponses chan string
+	disconnected   chan error // buffered=1: signals a connection loss once per drop
 
-	// Signals the read loop has exited.
+	// Last Subscribe map, replayed on Reconnect so consumers don't
+	// need to re-subscribe themselves.
+	subMu      sync.Mutex
+	lastSubMap map[string][]string
+
+	// Set by Close() so the readLoop exit suppresses the disconnect
+	// signal during normal shutdown.
+	closing atomic.Bool
+
+	// Closed by Close(); call() selects on it to abort blocked waits.
 	done chan struct{}
 }
 
 // New creates a new Client connected to the given host (host:port).
 // It dials ws://<host>/websocket and starts the background read loop.
 func New(host string) (*Client, error) {
-	url := fmt.Sprintf("ws://%s/websocket", host)
-
-	dialer := websocket.Dialer{
-		HandshakeTimeout: 10 * time.Second,
-	}
-
-	conn, _, err := dialer.Dial(url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("dial %s: %w", url, err)
-	}
-
 	c := &Client{
-		conn:           conn,
 		host:           host,
 		pending:        make(map[int64]chan *rpcResponse),
 		updates:        make(chan StatusUpdate, 64),
 		gcodeResponses: make(chan string, 64),
+		disconnected:   make(chan error, 1),
 		done:           make(chan struct{}),
 	}
-
-	go c.readLoop()
-
+	if err := c.dial(); err != nil {
+		return nil, err
+	}
+	go c.readLoop(c.conn)
 	return c, nil
+}
+
+// dial establishes a fresh websocket connection and swaps it into
+// c.conn under writeMu (so an in-flight write can't race with the swap).
+func (c *Client) dial() error {
+	url := fmt.Sprintf("ws://%s/websocket", c.host)
+	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
+	conn, _, err := dialer.Dial(url, nil)
+	if err != nil {
+		return fmt.Errorf("dial %s: %w", url, err)
+	}
+	c.writeMu.Lock()
+	c.conn = conn
+	c.writeMu.Unlock()
+	return nil
+}
+
+// Reconnect re-establishes the websocket and replays the last Subscribe
+// call's object map so live updates resume without consumer involvement.
+// One attempt — the caller is expected to drive backoff/retry.
+func (c *Client) Reconnect(ctx context.Context) error {
+	if c.closing.Load() {
+		return fmt.Errorf("client is closing")
+	}
+	if err := c.dial(); err != nil {
+		return err
+	}
+	go c.readLoop(c.conn)
+
+	c.subMu.Lock()
+	sub := c.lastSubMap
+	c.subMu.Unlock()
+	if sub == nil {
+		return nil
+	}
+	if _, err := c.Subscribe(sub); err != nil {
+		return fmt.Errorf("resubscribe: %w", err)
+	}
+	return nil
+}
+
+// Disconnected returns a channel that emits exactly once each time the
+// underlying connection drops. The caller should re-read after each
+// successful Reconnect to arm the channel for the next drop.
+func (c *Client) Disconnected() <-chan error {
+	return c.disconnected
 }
 
 // Updates returns a read-only channel that emits parsed
@@ -133,22 +198,28 @@ func (c *Client) GcodeResponses() <-chan string {
 	return c.gcodeResponses
 }
 
-// Close shuts down the WebSocket connection and waits for the read loop
-// to exit.
+// Close shuts down the WebSocket connection.
+//
+// Sets the closing flag first so the readLoop's exit doesn't fire a
+// disconnect notification (it's an expected shutdown, not a drop),
+// then closes done so any blocked call() returns promptly.
 func (c *Client) Close() error {
+	c.closing.Store(true)
 	c.writeMu.Lock()
 	err := c.conn.WriteMessage(
 		websocket.CloseMessage,
 		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
 	)
+	conn := c.conn
 	c.writeMu.Unlock()
 	if err != nil {
-		// Best-effort; the connection may already be dead.
-		_ = c.conn.Close()
+		_ = conn.Close()
 	}
-
-	// Wait for readLoop to finish.
-	<-c.done
+	select {
+	case <-c.done:
+	default:
+		close(c.done)
+	}
 	return nil
 }
 
@@ -189,15 +260,19 @@ func (c *Client) call(method string, params any) (json.RawMessage, error) {
 		return nil, fmt.Errorf("write: %w", err)
 	}
 
-	// Wait for the response (or connection close).
+	// Wait for the response, a connection drop (readLoop closes our
+	// channel from failPending), or a full client close.
 	select {
-	case resp := <-ch:
+	case resp, ok := <-ch:
+		if !ok {
+			return nil, fmt.Errorf("connection lost while waiting for response to %s (id=%d)", method, id)
+		}
 		if resp.Error != nil {
 			return nil, resp.Error
 		}
 		return resp.Result, nil
 	case <-c.done:
-		return nil, fmt.Errorf("connection closed while waiting for response to %s (id=%d)", method, id)
+		return nil, fmt.Errorf("client closed while waiting for response to %s (id=%d)", method, id)
 	}
 }
 
@@ -207,25 +282,45 @@ func (c *Client) removePending(id int64) {
 	c.mu.Unlock()
 }
 
+// failPending closes every pending response channel so any blocked
+// call() returns with an error. Called on every readLoop exit.
+func (c *Client) failPending() {
+	c.mu.Lock()
+	for id, ch := range c.pending {
+		close(ch)
+		delete(c.pending, id)
+	}
+	c.mu.Unlock()
+}
+
 // ---------------------------------------------------------------------------
 // Read loop — runs in its own goroutine
 // ---------------------------------------------------------------------------
 
-func (c *Client) readLoop() {
-	defer close(c.done)
-	defer c.conn.Close()
+// readLoop takes the conn it should read from as a parameter rather
+// than reading c.conn, so a new generation started by Reconnect can run
+// safely on the new conn while the previous goroutine (if still
+// finishing its exit path on the old conn) doesn't race.
+func (c *Client) readLoop(conn *websocket.Conn) {
+	defer conn.Close()
 
 	for {
-		_, msg, err := c.conn.ReadMessage()
+		_, msg, err := conn.ReadMessage()
 		if err != nil {
-			log.Printf("moonraker: read error (disconnected): %v", err)
-			// Fail all pending requests.
-			c.mu.Lock()
-			for id, ch := range c.pending {
-				close(ch)
-				delete(c.pending, id)
+			if !c.closing.Load() {
+				log.Printf("moonraker: read error (disconnected): %v", err)
 			}
-			c.mu.Unlock()
+			c.failPending()
+			if !c.closing.Load() {
+				// Non-blocking send — channel is buffered=1, so if the
+				// previous disconnect notification hasn't been consumed
+				// yet we just drop this one (consumer's already going
+				// to react to the first).
+				select {
+				case c.disconnected <- err:
+				default:
+				}
+			}
 			return
 		}
 

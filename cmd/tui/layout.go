@@ -290,7 +290,7 @@ func renderPanel(title, body string, focused bool, outerW, outerH int) string {
 // always-on global ones.
 // ---------------------------------------------------------------------------
 
-func renderFooter(f focusArea, job printJob, barView string) string {
+func renderFooter(f focusArea, job printJob, barView, connView string) string {
 	var paneName, paneKeys string
 	switch f {
 	case focusTable:
@@ -309,12 +309,28 @@ func renderFooter(f focusArea, job printJob, barView string) string {
 		paneName = "Tuning"
 		paneKeys = "↑/↓: field  •  enter: apply"
 	}
+	conn := connView + footerStyle.Render("  •  ")
 	left := footerFocusStyle.Render(paneName)
 	mid := footerStyle.Render("  " + paneKeys)
 	jobText := renderJobSummary(job, barView)
 	jobKeys := footerStyle.Render(jobControlHints(job))
 	right := footerStyle.Render("  •  tab: next pane  •  ctrl+c: quit")
-	return lipgloss.NewStyle().MarginLeft(2).Render(left + mid + jobText + jobKeys + right)
+	return lipgloss.NewStyle().MarginLeft(2).Render(conn + left + mid + jobText + jobKeys + right)
+}
+
+// renderConnIndicator renders the colored ●-prefixed connection state
+// chip for the start of the footer. Pulled out of renderFooter so
+// main.go can build it from its connState/nextRetryIn fields without
+// the layout file needing to know the connState enum.
+func renderConnIndicator(label string, ok bool, warn bool) string {
+	style := lipgloss.NewStyle().Foreground(colorOk).Bold(true)
+	if warn {
+		style = style.Foreground(colorAccentWarm)
+	}
+	if !ok && !warn {
+		style = style.Foreground(colorErr)
+	}
+	return style.Render("● " + label)
 }
 
 // jobControlHints returns the state-conditional p/r/c hint segment

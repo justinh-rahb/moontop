@@ -17,6 +17,7 @@ var (
 	colorAccentWarm    = lipgloss.Color("214") // amber
 	colorAccentCool    = lipgloss.Color("205") // pink (same as focus)
 	colorErr           = lipgloss.Color("203") // red
+	colorOk            = lipgloss.Color("78")  // green
 )
 
 // ---------------------------------------------------------------------------

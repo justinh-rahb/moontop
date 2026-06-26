@@ -7,6 +7,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -14,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/progress"
@@ -135,6 +137,42 @@ type errMsg struct{ err error }
 
 func (e errMsg) Error() string { return e.err.Error() }
 
+// ---------------------------------------------------------------------------
+// Reconnection
+// ---------------------------------------------------------------------------
+
+type connState int
+
+const (
+	stateConnected connState = iota
+	stateReconnecting
+	stateFailed // shown after reconnectFailedThreshold attempts; we keep retrying
+)
+
+// reconnectFailedThreshold = number of consecutive failed attempts
+// after which the UI switches from "reconnecting…" to a louder
+// "disconnected" banner. We never actually stop retrying.
+const reconnectFailedThreshold = 5
+
+// disconnectedMsg fires once per drop of the underlying websocket.
+type disconnectedMsg struct{ err error }
+
+// reconnectResultMsg fires after each Reconnect attempt finishes.
+type reconnectResultMsg struct {
+	attempt int
+	err     error
+}
+
+// backoffDelay returns the wait before the Nth reconnect attempt
+// (1-indexed): 1s, 2s, 4s, 8s, 16s, 30s cap.
+func backoffDelay(attempt int) time.Duration {
+	d := 1 << (attempt - 1)
+	if d > 30 {
+		d = 30
+	}
+	return time.Duration(d) * time.Second
+}
+
 // gcodeSentMsg is emitted after a GcodeScript call completes. If err is
 // non-nil, the send failed; otherwise no UI state change is needed (the
 // echo and response stream handle the visible feedback).
@@ -234,6 +272,11 @@ type model struct {
 	// Computed once per resize (see resizeLayout), consumed by View.
 	layout layout
 
+	// Connection lifecycle.
+	connState        connState
+	reconnectAttempt int
+	nextRetryIn      time.Duration // for footer display while reconnecting
+
 	ready bool
 	err   error
 }
@@ -305,6 +348,7 @@ func initialModel(client *moonraker.Client) model {
 		focus:        focusFiles,
 		stepIndex:    2, // 10 mm
 		job:          printJob{State: "standby"},
+		connState:    stateConnected,
 	}
 }
 
@@ -313,8 +357,34 @@ func (m model) Init() tea.Cmd {
 		m.initialize(),
 		m.listenUpdates(),
 		m.listenGcode(),
+		m.listenDisconnect(),
 		m.loadFiles(),
 	)
+}
+
+// listenDisconnect blocks on one disconnect signal, then is re-issued
+// after a successful Reconnect. The Client's disconnected channel
+// survives reconnects (it's created once in New), so the next drop
+// re-arms naturally.
+func (m model) listenDisconnect() tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		err := <-client.Disconnected()
+		return disconnectedMsg{err: err}
+	}
+}
+
+// attemptReconnect schedules one Reconnect attempt after `delay`. The
+// caller increments `attempt` for each retry. The TUI keeps calling
+// this with longer delays via backoffDelay until it succeeds — there
+// is no permanent give-up state, only a visible "failed" banner once
+// reconnectFailedThreshold is crossed.
+func (m model) attemptReconnect(attempt int, delay time.Duration) tea.Cmd {
+	client := m.client
+	return tea.Tick(delay, func(time.Time) tea.Msg {
+		err := client.Reconnect(context.Background())
+		return reconnectResultMsg{attempt: attempt, err: err}
+	})
 }
 
 // loadFiles fetches the gcode file list once at startup.
@@ -376,6 +446,21 @@ func (m model) cancelPrint() tea.Cmd {
 // i.e. while pause/resume/cancel are meaningful actions.
 func jobActive(state string) bool {
 	return state == "printing" || state == "paused"
+}
+
+// connected reports whether the websocket is currently up.
+func (m *model) connected() bool { return m.connState == stateConnected }
+
+// requireConnected gates a send. Returns the Cmd to run if we're
+// online; otherwise logs an inline note explaining what was dropped
+// and returns nil. Centralizing this keeps the "disconnected →
+// drop send + warn" behavior consistent across every send site.
+func (m *model) requireConnected(what string, cmd tea.Cmd) tea.Cmd {
+	if m.connected() {
+		return cmd
+	}
+	m.appendLog("!! disconnected — " + what + " not sent")
+	return nil
 }
 
 // initialize discovers sensor objects, subscribes to them, and returns
@@ -563,7 +648,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "y", "Y":
 				cmd := m.confirmation.onYes
 				m.confirmation = nil
-				return m, cmd
+				return m, m.requireConnected("action", cmd)
 			case "n", "N", "esc":
 				m.confirmation = nil
 			}
@@ -699,6 +784,34 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.appendLog(fmt.Sprintf("!! set velocity limit: %v", msg.err))
 		}
 		return m, nil
+
+	case disconnectedMsg:
+		m.connState = stateReconnecting
+		m.reconnectAttempt = 1
+		m.nextRetryIn = backoffDelay(1)
+		m.appendLog(fmt.Sprintf("!! disconnected: %v", msg.err))
+		return m, m.attemptReconnect(1, m.nextRetryIn)
+
+	case reconnectResultMsg:
+		if msg.err == nil {
+			m.connState = stateConnected
+			m.reconnectAttempt = 0
+			m.nextRetryIn = 0
+			m.appendLog(fmt.Sprintf("** reconnected (attempt %d)", msg.attempt))
+			// Re-arm the disconnect watcher for the next drop. The
+			// status and gcode listeners are NOT re-issued — their
+			// channels survive reconnect (see Client doc comment),
+			// the goroutines blocked on them simply resume reading
+			// once the new readLoop starts pushing data.
+			return m, m.listenDisconnect()
+		}
+		next := msg.attempt + 1
+		if next > reconnectFailedThreshold {
+			m.connState = stateFailed
+		}
+		m.reconnectAttempt = next
+		m.nextRetryIn = backoffDelay(next)
+		return m, m.attemptReconnect(next, m.nextRetryIn)
 
 	case errMsg:
 		m.err = msg.err
@@ -884,9 +997,9 @@ func (m *model) applyTuning() tea.Cmd {
 
 	client := m.client
 	v, a, s, c := parsed[tuningVelocity], parsed[tuningAccel], parsed[tuningSqCornerV], parsed[tuningMinCruise]
-	return func() tea.Msg {
+	return m.requireConnected("apply limits", func() tea.Msg {
 		return tuningAppliedMsg{err: client.SetVelocityLimit(v, a, s, c)}
-	}
+	})
 }
 
 // tuningAppliedMsg surfaces send errors from SET_VELOCITY_LIMIT into
@@ -904,12 +1017,12 @@ func (m *model) handleJobControl(msg tea.KeyMsg) (tea.Cmd, bool) {
 	switch msg.String() {
 	case "p":
 		if m.job.State == "printing" {
-			return m.pausePrint(), true
+			return m.requireConnected("pause", m.pausePrint()), true
 		}
 		return nil, true
 	case "r":
 		if m.job.State == "paused" {
-			return m.resumePrint(), true
+			return m.requireConnected("resume", m.resumePrint()), true
 		}
 		return nil, true
 	case "c":
@@ -951,7 +1064,7 @@ func (m *model) handleJogKey(msg tea.KeyMsg) tea.Cmd {
 			m.stepIndex++
 		}
 	case "H":
-		return m.sendGcode("G28")
+		return m.requireConnected("home", m.sendGcode("G28"))
 	}
 	return nil
 }
@@ -966,7 +1079,7 @@ func (m *model) sendJog(axis string, delta float64) tea.Cmd {
 		fmt.Sprintf("G1 %s%g F%d", axis, delta, jogFeedrate),
 		"RESTORE_GCODE_STATE NAME=_ui_movement",
 	}, "\n")
-	return m.sendGcode(script)
+	return m.requireConnected("jog", m.sendGcode(script))
 }
 
 func (m *model) submitCommand() tea.Cmd {
@@ -985,7 +1098,7 @@ func (m *model) submitCommand() tea.Cmd {
 	}
 	m.historyIdx = len(m.history)
 	m.appendLog(">>> " + text)
-	return m.sendGcode(text)
+	return m.requireConnected("command", m.sendGcode(text))
 }
 
 // handleConsoleKey routes a key while the console pane has focus.
@@ -1249,7 +1362,7 @@ func (m model) View() string {
 	if m.job.State == "printing" {
 		barView = m.progress.View()
 	}
-	footer := renderFooter(m.focus, m.job, barView)
+	footer := renderFooter(m.focus, m.job, barView, m.renderConnView())
 
 	out := title + "\n" + body + "\n"
 	if m.confirmation != nil {
@@ -1261,6 +1374,24 @@ func (m model) View() string {
 
 func (m model) renderFiles() string {
 	return m.files.View()
+}
+
+// renderConnView builds the connection-status chip shown at the left
+// of the footer, including the next-retry hint while reconnecting.
+func (m model) renderConnView() string {
+	switch m.connState {
+	case stateConnected:
+		return renderConnIndicator("online", true, false)
+	case stateReconnecting:
+		return renderConnIndicator(
+			fmt.Sprintf("reconnecting (#%d, next in %s)",
+				m.reconnectAttempt, m.nextRetryIn.Truncate(time.Second)),
+			false, true)
+	default: // stateFailed — still retrying, just louder
+		return renderConnIndicator(
+			fmt.Sprintf("disconnected — retrying in %s", m.nextRetryIn.Truncate(time.Second)),
+			false, false)
+	}
 }
 
 func (m model) renderTuning() string {

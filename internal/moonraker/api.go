@@ -35,6 +35,9 @@ func (c *Client) ListObjects() ([]string, error) {
 // to. Use nil (or an empty slice) as the value to subscribe to all
 // fields for that object.
 //
+// The map is remembered so Reconnect can replay it after a connection
+// drop — callers don't need to re-subscribe themselves.
+//
 // Example:
 //
 //	err := client.Subscribe(map[string][]string{
@@ -44,6 +47,9 @@ func (c *Client) ListObjects() ([]string, error) {
 //
 // The initial state snapshot is returned as a StatusUpdate.
 func (c *Client) Subscribe(objects map[string][]string) (*StatusUpdate, error) {
+	c.subMu.Lock()
+	c.lastSubMap = objects
+	c.subMu.Unlock()
 	// Moonraker expects null (not an empty array) to mean "all fields",
 	// so we convert []string{} / nil → JSON null.
 	mapped := make(map[string]any, len(objects))
