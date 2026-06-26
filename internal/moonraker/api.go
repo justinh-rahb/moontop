@@ -162,3 +162,21 @@ func (c *Client) StartPrint(filename string) error {
 	_, err := c.call("printer.print.start", params)
 	return err
 }
+
+// PausePrint pauses the currently running print.
+func (c *Client) PausePrint() error {
+	_, err := c.call("printer.print.pause", nil)
+	return err
+}
+
+// ResumePrint resumes a paused print.
+func (c *Client) ResumePrint() error {
+	_, err := c.call("printer.print.resume", nil)
+	return err
+}
+
+// CancelPrint cancels the currently running or paused print.
+func (c *Client) CancelPrint() error {
+	_, err := c.call("printer.print.cancel", nil)
+	return err
+}

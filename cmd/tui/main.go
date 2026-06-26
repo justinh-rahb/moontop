@@ -156,9 +156,11 @@ type model struct {
 	// Console log lines; viewport content is rebuilt from this on append.
 	logLines []string
 
-	// When non-nil, the files pane is in a "y/n confirm start of this
-	// file" sub-state. See handleFilesKey for how key routing changes.
-	confirmingPrint *string
+	// When non-nil, a y/n confirmation prompt is pending. Intercepts
+	// global key routing — see Update(). This same slot serves any
+	// confirm-gated action (start print, cancel print, future AFC
+	// eject, ...) so we don't grow a parallel flag per action.
+	confirmation *pendingConfirmation
 
 	focus focusArea
 
@@ -259,6 +261,42 @@ func (m model) startPrint(filename string) tea.Cmd {
 	return func() tea.Msg {
 		return printStartedMsg{filename: filename, err: client.StartPrint(filename)}
 	}
+}
+
+// pendingConfirmation represents an action waiting for y/n approval.
+// One slot on the model, reused for every confirm-gated action.
+type pendingConfirmation struct {
+	prompt string  // human-readable, rendered above the footer
+	onYes  tea.Cmd // executed if the user presses y
+}
+
+// jobControlMsg is emitted after a pause/resume/cancel call completes.
+// Like printStartedMsg, it only surfaces send failures — the visible
+// state change waits for the next print_stats update.
+type jobControlMsg struct {
+	action string
+	err    error
+}
+
+func (m model) pausePrint() tea.Cmd {
+	client := m.client
+	return func() tea.Msg { return jobControlMsg{"pause", client.PausePrint()} }
+}
+
+func (m model) resumePrint() tea.Cmd {
+	client := m.client
+	return func() tea.Msg { return jobControlMsg{"resume", client.ResumePrint()} }
+}
+
+func (m model) cancelPrint() tea.Cmd {
+	client := m.client
+	return func() tea.Msg { return jobControlMsg{"cancel", client.CancelPrint()} }
+}
+
+// jobActive returns true while a print is either running or paused —
+// i.e. while pause/resume/cancel are meaningful actions.
+func jobActive(state string) bool {
+	return state == "printing" || state == "paused"
 }
 
 // initialize discovers sensor objects, subscribes to them, and returns
@@ -405,7 +443,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.KeyMsg:
-		// Global keys that fire regardless of focus.
+		// 1. Confirmation prompt intercepts first — when one is armed,
+		//    only y/n/esc are meaningful; everything else is swallowed.
+		if m.confirmation != nil {
+			switch msg.String() {
+			case "y", "Y":
+				cmd := m.confirmation.onYes
+				m.confirmation = nil
+				return m, cmd
+			case "n", "N", "esc":
+				m.confirmation = nil
+			}
+			return m, nil
+		}
+
+		// 2. Global keys that fire regardless of focus.
 		switch msg.String() {
 		case "ctrl+c":
 			m.client.Close()
@@ -419,6 +471,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focus != focusConsole {
 				m.client.Close()
 				return m, tea.Quit
+			}
+		}
+
+		// 3. Global job controls. Skip while the console is capturing
+		//    text input — same rationale as the 'q' guard above.
+		if m.focus != focusConsole {
+			if cmd, handled := m.handleJobControl(msg); handled {
+				return m, cmd
 			}
 		}
 
@@ -498,6 +558,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case jobControlMsg:
+		if msg.err != nil {
+			m.appendLog(fmt.Sprintf("!! %s: %v", msg.action, msg.err))
+		}
+		return m, nil
+
 	case errMsg:
 		m.err = msg.err
 		return m, nil
@@ -508,11 +574,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *model) toggleFocus() {
 	// table → jog → console → files → table …
-	// Leaving the files pane also clears any in-flight confirmation:
-	// don't let "y" land on the next pane and look like input.
-	if m.focus == focusFiles {
-		m.confirmingPrint = nil
-	}
+	// Confirmation is now global (not files-pane-scoped), so Tab no
+	// longer needs to clear it — it survives focus changes intentionally.
 	switch m.focus {
 	case focusTable:
 		m.focus = focusJog
@@ -527,31 +590,19 @@ func (m *model) toggleFocus() {
 	}
 }
 
-// handleFilesKey implements the files pane's key behavior, including
-// the "y/n confirm" sub-state. The pattern: when confirmingPrint is
-// non-nil, the pane intercepts a small set of keys (y/n/esc) before
-// any list navigation happens — making it act like a temporary modal
-// without needing a separate modal component.
+// handleFilesKey implements the files pane's key behavior. The y/n
+// confirmation sub-state used to live here (Phase 7); it now lives at
+// the top of Update() so any global action can reuse it. Enter just
+// arms a confirmation and returns — the actual y/n handling happens
+// globally.
 func (m *model) handleFilesKey(msg tea.KeyMsg) tea.Cmd {
-	if m.confirmingPrint != nil {
-		switch msg.String() {
-		case "y", "Y":
-			name := *m.confirmingPrint
-			m.confirmingPrint = nil
-			m.appendLog(">>> start print " + name)
-			return m.startPrint(name)
-		case "n", "N", "esc":
-			m.confirmingPrint = nil
-		}
-		// Any other key while confirming is swallowed — don't let it
-		// drift into the list selection underneath.
-		return nil
-	}
-
 	if msg.String() == "enter" {
 		if it, ok := m.files.SelectedItem().(fileItem); ok {
 			name := it.info.Path
-			m.confirmingPrint = &name
+			m.confirmation = &pendingConfirmation{
+				prompt: "Start print: " + name + "?",
+				onYes:  m.startPrint(name),
+			}
 		}
 		return nil
 	}
@@ -559,6 +610,36 @@ func (m *model) handleFilesKey(msg tea.KeyMsg) tea.Cmd {
 	var cmd tea.Cmd
 	m.files, cmd = m.files.Update(msg)
 	return cmd
+}
+
+// handleJobControl dispatches p/r/c global keypresses based on the
+// current job state. Returns (cmd, true) when the key was a recognized
+// job-control action — even if it was a no-op for the current state
+// (so the key gets swallowed rather than falling through to pane
+// routing). Returns (_, false) when the key isn't a job-control key
+// at all.
+func (m *model) handleJobControl(msg tea.KeyMsg) (tea.Cmd, bool) {
+	switch msg.String() {
+	case "p":
+		if m.job.State == "printing" {
+			return m.pausePrint(), true
+		}
+		return nil, true
+	case "r":
+		if m.job.State == "paused" {
+			return m.resumePrint(), true
+		}
+		return nil, true
+	case "c":
+		if jobActive(m.job.State) {
+			m.confirmation = &pendingConfirmation{
+				prompt: "Cancel current print?",
+				onYes:  m.cancelPrint(),
+			}
+		}
+		return nil, true
+	}
+	return nil, false
 }
 
 // handleJogKey reacts to a keypress while the jog pane is focused.
@@ -808,26 +889,17 @@ func (m model) View() string {
 	body := bodyStyle.Render(stacked)
 
 	title := appTitleStyle.Render("🌡 Moonraker")
-	footer := renderFooter(m.focus, m.job, m.confirmingPrint != nil)
+	footer := renderFooter(m.focus, m.job)
 
-	return title + "\n" + body + "\n" + footer + "\n"
+	out := title + "\n" + body + "\n"
+	if m.confirmation != nil {
+		out += renderConfirmation(m.confirmation.prompt) + "\n"
+	}
+	out += footer + "\n"
+	return out
 }
 
-// renderFiles returns the files pane body — either the list view, or
-// the confirmation prompt overlaid on top of the current selection
-// when confirmingPrint is set.
 func (m model) renderFiles() string {
-	if m.confirmingPrint != nil {
-		prompt := jogStepStyle.Render(
-			fmt.Sprintf("Start print: %s ?", *m.confirmingPrint),
-		)
-		hint := jogHintStyle.Render("y to confirm   •   n / esc to cancel")
-		return lipgloss.JoinVertical(lipgloss.Left,
-			prompt,
-			"",
-			hint,
-		)
-	}
 	return m.files.View()
 }
 

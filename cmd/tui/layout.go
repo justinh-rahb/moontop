@@ -279,7 +279,7 @@ func renderPanel(title, body string, focused bool, outerW, outerH int) string {
 // always-on global ones.
 // ---------------------------------------------------------------------------
 
-func renderFooter(f focusArea, job printJob, confirming bool) string {
+func renderFooter(f focusArea, job printJob) string {
 	var paneName, paneKeys string
 	switch f {
 	case focusTable:
@@ -293,17 +293,38 @@ func renderFooter(f focusArea, job printJob, confirming bool) string {
 		paneKeys = "arrows: jog XY  •  PgUp/PgDn: jog Z  •  [/]: step  •  H: home"
 	case focusFiles:
 		paneName = "Files"
-		if confirming {
-			paneKeys = "y: confirm  •  n/esc: cancel"
-		} else {
-			paneKeys = "↑/↓: select  •  /: filter  •  enter: print"
-		}
+		paneKeys = "↑/↓: select  •  /: filter  •  enter: print"
 	}
 	left := footerFocusStyle.Render(paneName)
 	mid := footerStyle.Render("  " + paneKeys)
 	jobText := footerStyle.Render("  •  " + describeJob(job))
+	jobKeys := footerStyle.Render(jobControlHints(job))
 	right := footerStyle.Render("  •  tab: next pane  •  ctrl+c: quit")
-	return lipgloss.NewStyle().MarginLeft(2).Render(left + mid + jobText + right)
+	return lipgloss.NewStyle().MarginLeft(2).Render(left + mid + jobText + jobKeys + right)
+}
+
+// jobControlHints returns the state-conditional p/r/c hint segment
+// for the footer. Empty when no job is active so the footer stays
+// uncluttered during standby.
+func jobControlHints(job printJob) string {
+	switch job.State {
+	case "printing":
+		return "  •  p: pause  •  c: cancel"
+	case "paused":
+		return "  •  r: resume  •  c: cancel"
+	default:
+		return ""
+	}
+}
+
+// renderConfirmation displays a y/n prompt as a banner between the
+// body and the footer. Single source of truth for confirmation UI —
+// every action that arms m.confirmation shows up here, no per-pane
+// rendering.
+func renderConfirmation(prompt string) string {
+	q := footerFocusStyle.Foreground(colorAccentWarm).Render("? " + prompt)
+	hint := footerStyle.Render("   y to confirm   •   n / esc to cancel")
+	return lipgloss.NewStyle().MarginLeft(2).Render(q + hint)
 }
 
 // describeJob renders the print_stats summary shown in the footer.
