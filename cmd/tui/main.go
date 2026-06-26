@@ -211,6 +211,15 @@ type model struct {
 	// Console log lines; viewport content is rebuilt from this on append.
 	logLines []string
 
+	// Console command history (in-memory only). historyIdx points to
+	// the entry currently shown in the textinput while recalling;
+	// historyIdx == len(history) means "not recalling, live draft."
+	// historyDraft preserves whatever the user typed before pressing
+	// Up, so Down past the newest entry restores it.
+	history      []string
+	historyIdx   int
+	historyDraft string
+
 	// When non-nil, a y/n confirmation prompt is pending. Intercepts
 	// global key routing — see Update(). This same slot serves any
 	// confirm-gated action (start print, cancel print, future AFC
@@ -589,12 +598,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Route the key to the focused sub-model / handler.
 		switch m.focus {
 		case focusConsole:
-			if msg.String() == "enter" {
-				return m, m.submitCommand()
-			}
-			var cmd tea.Cmd
-			m.input, cmd = m.input.Update(msg)
-			return m, cmd
+			return m, m.handleConsoleKey(msg)
 		case focusTable:
 			var cmd tea.Cmd
 			m.table, cmd = m.table.Update(msg)
@@ -968,11 +972,78 @@ func (m *model) sendJog(axis string, delta float64) tea.Cmd {
 func (m *model) submitCommand() tea.Cmd {
 	text := strings.TrimSpace(m.input.Value())
 	m.input.SetValue("")
+	// Reset recall state for the next prompt.
+	m.historyIdx = len(m.history)
+	m.historyDraft = ""
 	if text == "" {
 		return nil
 	}
+	// Append to history unless it duplicates the immediately preceding
+	// entry. Skip dedup of older matches — that's a different feature.
+	if len(m.history) == 0 || m.history[len(m.history)-1] != text {
+		m.history = append(m.history, text)
+	}
+	m.historyIdx = len(m.history)
 	m.appendLog(">>> " + text)
 	return m.sendGcode(text)
+}
+
+// handleConsoleKey routes a key while the console pane has focus.
+// Up/Down navigate command history; Enter submits; everything else is
+// passed through to the textinput (which handles the actual editing).
+//
+// Recall-state convention:
+//   - historyIdx == len(history)  → not recalling; textinput holds the
+//     user's live draft.
+//   - 0 <= historyIdx < len(history) → recalling; textinput holds
+//     history[historyIdx]. historyDraft preserves the pre-recall draft.
+func (m *model) handleConsoleKey(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "enter":
+		return m.submitCommand()
+
+	case "up":
+		if len(m.history) == 0 {
+			return nil
+		}
+		if m.historyIdx == len(m.history) {
+			// First Up of a fresh recall — snapshot the live draft
+			// so Down can later restore it.
+			m.historyDraft = m.input.Value()
+		}
+		if m.historyIdx > 0 {
+			m.historyIdx--
+			m.input.SetValue(m.history[m.historyIdx])
+			m.input.CursorEnd()
+		}
+		return nil
+
+	case "down":
+		if m.historyIdx == len(m.history) {
+			// Not recalling; nothing to step toward.
+			return nil
+		}
+		m.historyIdx++
+		if m.historyIdx == len(m.history) {
+			m.input.SetValue(m.historyDraft)
+		} else {
+			m.input.SetValue(m.history[m.historyIdx])
+		}
+		m.input.CursorEnd()
+		return nil
+	}
+
+	// Any non-navigation key: feed it to the textinput. If we were
+	// recalling, the user is now editing the recalled text — promote
+	// it to a fresh draft so subsequent Up snapshots the edited value
+	// instead of overwriting it with the old draft.
+	if m.historyIdx != len(m.history) {
+		m.historyIdx = len(m.history)
+		m.historyDraft = ""
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return cmd
 }
 
 func (m *model) appendLog(line string) {
