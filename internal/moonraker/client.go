@@ -77,6 +77,10 @@ type Client struct {
 	// Auto-incrementing request ID.
 	nextID atomic.Int64
 
+	// Serializes WriteMessage calls — gorilla/websocket allows only
+	// one concurrent writer per connection and panics otherwise.
+	writeMu sync.Mutex
+
 	// Pending requests awaiting a response, keyed by request ID.
 	mu       sync.Mutex
 	pending  map[int64]chan *rpcResponse
@@ -132,10 +136,12 @@ func (c *Client) GcodeResponses() <-chan string {
 // Close shuts down the WebSocket connection and waits for the read loop
 // to exit.
 func (c *Client) Close() error {
+	c.writeMu.Lock()
 	err := c.conn.WriteMessage(
 		websocket.CloseMessage,
 		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
 	)
+	c.writeMu.Unlock()
 	if err != nil {
 		// Best-effort; the connection may already be dead.
 		_ = c.conn.Close()
@@ -175,7 +181,10 @@ func (c *Client) call(method string, params any) (json.RawMessage, error) {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+	c.writeMu.Lock()
+	err = c.conn.WriteMessage(websocket.TextMessage, data)
+	c.writeMu.Unlock()
+	if err != nil {
 		c.removePending(id)
 		return nil, fmt.Errorf("write: %w", err)
 	}

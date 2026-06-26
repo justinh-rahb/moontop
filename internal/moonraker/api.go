@@ -133,3 +133,32 @@ func (c *Client) EmergencyStop() error {
 	_, err := c.call("printer.emergency_stop", nil)
 	return err
 }
+
+// FileInfo describes a single gcode file from server.files.list.
+type FileInfo struct {
+	Path         string  `json:"path"`
+	Size         int64   `json:"size"`
+	ModifiedTime float64 `json:"modified"`
+}
+
+// ListFiles returns all gcode files in the "gcodes" root, recursively.
+func (c *Client) ListFiles() ([]FileInfo, error) {
+	params := map[string]any{"root": "gcodes"}
+	result, err := c.call("server.files.list", params)
+	if err != nil {
+		return nil, err
+	}
+	var files []FileInfo
+	if err := json.Unmarshal(result, &files); err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
+// StartPrint queues and begins a print of the named gcode file
+// (path relative to the gcodes root).
+func (c *Client) StartPrint(filename string) error {
+	params := map[string]any{"filename": filename}
+	_, err := c.call("printer.print.start", params)
+	return err
+}

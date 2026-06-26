@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -60,7 +61,31 @@ const jogFeedrate = 1500 // mm/min, used for relative G1 moves
 type initMsg struct {
 	sensors  map[string]*sensorState
 	position [3]float64
+	job      printJob
 	err      error
+}
+
+// filesLoadedMsg arrives once ListFiles returns. Files is sorted with
+// most-recently-modified first.
+type filesLoadedMsg struct {
+	files []moonraker.FileInfo
+	err   error
+}
+
+// printStartedMsg arrives after a StartPrint Cmd completes. The footer
+// will still wait for print_stats to confirm before showing "Printing"
+// — this message just surfaces send failures.
+type printStartedMsg struct {
+	filename string
+	err      error
+}
+
+// printJob mirrors the subset of print_stats we care about for the
+// footer/job-status display.
+type printJob struct {
+	State    string // "standby" | "printing" | "paused" | "complete" | "error" | "cancelled"
+	Filename string
+	Duration float64 // seconds of active print time
 }
 
 type errMsg struct{ err error }
@@ -101,6 +126,7 @@ const (
 	focusTable focusArea = iota
 	focusConsole
 	focusJog
+	focusFiles
 )
 
 // ---------------------------------------------------------------------------
@@ -119,12 +145,20 @@ type model struct {
 	// Index into jogStepSizes — easier to cycle than a free float.
 	stepIndex int
 
+	// Current print job state (from print_stats).
+	job printJob
+
 	table    table.Model
 	viewport viewport.Model
 	input    textinput.Model
+	files    list.Model
 
 	// Console log lines; viewport content is rebuilt from this on append.
 	logLines []string
+
+	// When non-nil, the files pane is in a "y/n confirm start of this
+	// file" sub-state. See handleFilesKey for how key routing changes.
+	confirmingPrint *string
 
 	focus focusArea
 
@@ -138,6 +172,34 @@ type model struct {
 	err   error
 }
 
+// fileItem adapts a moonraker.FileInfo for bubbles/list.
+type fileItem struct {
+	info moonraker.FileInfo
+}
+
+func (f fileItem) Title() string       { return f.info.Path }
+func (f fileItem) Description() string { return formatBytes(f.info.Size) }
+func (f fileItem) FilterValue() string { return f.info.Path }
+
+// formatBytes renders a byte count in a human-friendly unit.
+func formatBytes(n int64) string {
+	const (
+		kb = 1024
+		mb = 1024 * kb
+		gb = 1024 * mb
+	)
+	switch {
+	case n >= gb:
+		return fmt.Sprintf("%.1f GB", float64(n)/float64(gb))
+	case n >= mb:
+		return fmt.Sprintf("%.1f MB", float64(n)/float64(mb))
+	case n >= kb:
+		return fmt.Sprintf("%.1f KB", float64(n)/float64(kb))
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
+}
+
 func initialModel(client *moonraker.Client) model {
 	ti := textinput.New()
 	ti.Placeholder = "Type a gcode command (e.g. M115, G28) and press Enter"
@@ -146,13 +208,22 @@ func initialModel(client *moonraker.Client) model {
 
 	vp := viewport.New(40, 10)
 
+	files := list.New(nil, list.NewDefaultDelegate(), 40, 10)
+	files.Title = "" // we render our own pane title
+	files.SetShowTitle(false)
+	files.SetShowStatusBar(false)
+	files.SetShowHelp(false)
+	files.SetFilteringEnabled(true)
+
 	return model{
 		client:    client,
 		sensors:   make(map[string]*sensorState),
 		viewport:  vp,
 		input:     ti,
+		files:     files,
 		focus:     focusTable,
 		stepIndex: 2, // 10 mm
+		job:       printJob{State: "standby"},
 	}
 }
 
@@ -161,7 +232,33 @@ func (m model) Init() tea.Cmd {
 		m.initialize(),
 		m.listenUpdates(),
 		m.listenGcode(),
+		m.loadFiles(),
 	)
+}
+
+// loadFiles fetches the gcode file list once at startup.
+func (m model) loadFiles() tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		files, err := client.ListFiles()
+		if err != nil {
+			return filesLoadedMsg{err: err}
+		}
+		// Most recently modified first — matches Mainsail's default.
+		sort.Slice(files, func(i, j int) bool {
+			return files[i].ModifiedTime > files[j].ModifiedTime
+		})
+		return filesLoadedMsg{files: files}
+	}
+}
+
+// startPrint asks Moonraker to begin printing the named file. The job
+// state will still go through print_stats, not optimistic updates.
+func (m model) startPrint(filename string) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		return printStartedMsg{filename: filename, err: client.StartPrint(filename)}
+	}
 }
 
 // initialize discovers sensor objects, subscribes to them, and returns
@@ -184,9 +281,10 @@ func (m model) initialize() tea.Cmd {
 			return initMsg{err: fmt.Errorf("no heater/sensor objects found")}
 		}
 
-		// Add toolhead alongside the heaters — same subscription,
-		// just another object in the request map.
+		// Add toolhead + print_stats alongside the heaters — same
+		// subscription, just more objects in the request map.
 		subMap["toolhead"] = []string{"position"}
+		subMap["print_stats"] = []string{"state", "filename", "print_duration"}
 
 		initial, err := m.client.Subscribe(subMap)
 		if err != nil {
@@ -200,9 +298,10 @@ func (m model) initialize() tea.Cmd {
 			}
 		}
 		var position [3]float64
-		mergeStatus(sensors, &position, initial.Objects)
+		job := printJob{State: "standby"}
+		mergeStatus(sensors, &position, &job, initial.Objects)
 
-		return initMsg{sensors: sensors, position: position}
+		return initMsg{sensors: sensors, position: position, job: job}
 	}
 }
 
@@ -248,6 +347,7 @@ func (m model) sendGcode(cmd string) tea.Cmd {
 func mergeStatus(
 	sensors map[string]*sensorState,
 	position *[3]float64,
+	job *printJob,
 	objects map[string]map[string]any,
 ) {
 	for name, fields := range objects {
@@ -260,6 +360,22 @@ func mergeStatus(
 							position[i] = f
 						}
 					}
+				}
+			}
+		case name == "print_stats":
+			if v, ok := fields["state"]; ok {
+				if s, ok := v.(string); ok {
+					job.State = s
+				}
+			}
+			if v, ok := fields["filename"]; ok {
+				if s, ok := v.(string); ok {
+					job.Filename = s
+				}
+			}
+			if v, ok := fields["print_duration"]; ok {
+				if f, ok := v.(float64); ok {
+					job.Duration = f
 				}
 			}
 		default:
@@ -321,6 +437,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		case focusJog:
 			return m, m.handleJogKey(msg)
+		case focusFiles:
+			return m, m.handleFilesKey(msg)
 		}
 
 	case tea.WindowSizeMsg:
@@ -338,6 +456,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sensors = msg.sensors
 		m.sensorNames = sortedKeys(msg.sensors)
 		m.position = msg.position
+		m.job = msg.job
 		m.ready = true
 		m.buildTable()
 		m.resizeLayout()
@@ -347,7 +466,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.ready {
 			return m, m.listenUpdates()
 		}
-		mergeStatus(m.sensors, &m.position, msg.Objects)
+		mergeStatus(m.sensors, &m.position, &m.job, msg.Objects)
 		m.rebuildRows()
 		return m, m.listenUpdates()
 
@@ -361,6 +480,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case filesLoadedMsg:
+		if msg.err != nil {
+			m.appendLog(fmt.Sprintf("!! load files: %v", msg.err))
+			return m, nil
+		}
+		items := make([]list.Item, len(msg.files))
+		for i, f := range msg.files {
+			items[i] = fileItem{info: f}
+		}
+		m.files.SetItems(items)
+		return m, nil
+
+	case printStartedMsg:
+		if msg.err != nil {
+			m.appendLog(fmt.Sprintf("!! start print %q: %v", msg.filename, msg.err))
+		}
+		return m, nil
+
 	case errMsg:
 		m.err = msg.err
 		return m, nil
@@ -370,17 +507,58 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) toggleFocus() {
-	// table → console → jog → table …
+	// table → jog → console → files → table …
+	// Leaving the files pane also clears any in-flight confirmation:
+	// don't let "y" land on the next pane and look like input.
+	if m.focus == focusFiles {
+		m.confirmingPrint = nil
+	}
 	switch m.focus {
 	case focusTable:
+		m.focus = focusJog
+	case focusJog:
 		m.focus = focusConsole
 		m.input.Focus()
 	case focusConsole:
-		m.focus = focusJog
+		m.focus = focusFiles
 		m.input.Blur()
-	case focusJog:
+	case focusFiles:
 		m.focus = focusTable
 	}
+}
+
+// handleFilesKey implements the files pane's key behavior, including
+// the "y/n confirm" sub-state. The pattern: when confirmingPrint is
+// non-nil, the pane intercepts a small set of keys (y/n/esc) before
+// any list navigation happens — making it act like a temporary modal
+// without needing a separate modal component.
+func (m *model) handleFilesKey(msg tea.KeyMsg) tea.Cmd {
+	if m.confirmingPrint != nil {
+		switch msg.String() {
+		case "y", "Y":
+			name := *m.confirmingPrint
+			m.confirmingPrint = nil
+			m.appendLog(">>> start print " + name)
+			return m.startPrint(name)
+		case "n", "N", "esc":
+			m.confirmingPrint = nil
+		}
+		// Any other key while confirming is swallowed — don't let it
+		// drift into the list selection underneath.
+		return nil
+	}
+
+	if msg.String() == "enter" {
+		if it, ok := m.files.SelectedItem().(fileItem); ok {
+			name := it.info.Path
+			m.confirmingPrint = &name
+		}
+		return nil
+	}
+
+	var cmd tea.Cmd
+	m.files, cmd = m.files.Update(msg)
+	return cmd
 }
 
 // handleJogKey reacts to a keypress while the jog pane is focused.
@@ -525,6 +703,8 @@ func (m *model) resizeLayout() {
 	m.viewport.SetContent(strings.Join(m.logLines, "\n"))
 	m.viewport.GotoBottom()
 	m.input.Width = m.layout.inputW
+
+	m.files.SetSize(m.layout.filesContentW, m.layout.filesContentH)
 }
 
 func (m *model) rebuildRows() {
@@ -602,6 +782,13 @@ func (m model) View() string {
 		m.layout.jogBoxW,
 		paneHeight(m.layout, focusJog),
 	)
+	filesPane := renderPanel(
+		"Files",
+		m.renderFiles(),
+		m.focus == focusFiles,
+		m.layout.filesBoxW,
+		paneHeight(m.layout, focusFiles),
+	)
 	consolePane := renderPanel(
 		"Console",
 		m.viewport.View()+"\n"+m.input.View(),
@@ -613,17 +800,35 @@ func (m model) View() string {
 	var stacked string
 	switch m.layout.mode {
 	case layoutWide:
-		top := lipgloss.JoinHorizontal(lipgloss.Top, tablePane, jogPane)
+		top := lipgloss.JoinHorizontal(lipgloss.Top, tablePane, jogPane, filesPane)
 		stacked = lipgloss.JoinVertical(lipgloss.Left, top, consolePane)
 	default: // stacked
-		stacked = lipgloss.JoinVertical(lipgloss.Left, tablePane, jogPane, consolePane)
+		stacked = lipgloss.JoinVertical(lipgloss.Left, tablePane, jogPane, filesPane, consolePane)
 	}
 	body := bodyStyle.Render(stacked)
 
 	title := appTitleStyle.Render("🌡 Moonraker")
-	footer := renderFooter(m.focus)
+	footer := renderFooter(m.focus, m.job, m.confirmingPrint != nil)
 
 	return title + "\n" + body + "\n" + footer + "\n"
+}
+
+// renderFiles returns the files pane body — either the list view, or
+// the confirmation prompt overlaid on top of the current selection
+// when confirmingPrint is set.
+func (m model) renderFiles() string {
+	if m.confirmingPrint != nil {
+		prompt := jogStepStyle.Render(
+			fmt.Sprintf("Start print: %s ?", *m.confirmingPrint),
+		)
+		hint := jogHintStyle.Render("y to confirm   •   n / esc to cancel")
+		return lipgloss.JoinVertical(lipgloss.Left,
+			prompt,
+			"",
+			hint,
+		)
+	}
+	return m.files.View()
 }
 
 // paneHeight returns the outer height for a given pane in the current
@@ -631,7 +836,7 @@ func (m model) View() string {
 // per-pane heights.
 func paneHeight(l layout, f focusArea) int {
 	if l.mode == layoutWide {
-		if f == focusTable || f == focusJog {
+		if f == focusTable || f == focusJog || f == focusFiles {
 			return l.topRowH
 		}
 		return 0
@@ -641,6 +846,8 @@ func paneHeight(l layout, f focusArea) int {
 		return l.tableH
 	case focusJog:
 		return l.jogH
+	case focusFiles:
+		return l.filesH
 	}
 	return 0
 }
