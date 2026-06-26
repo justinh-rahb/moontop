@@ -1,6 +1,10 @@
 package moonraker
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
 
 // ---------------------------------------------------------------------------
 // Typed API methods
@@ -179,4 +183,27 @@ func (c *Client) ResumePrint() error {
 func (c *Client) CancelPrint() error {
 	_, err := c.call("printer.print.cancel", nil)
 	return err
+}
+
+// SetVelocityLimit issues a SET_VELOCITY_LIMIT gcode with whichever
+// subset of parameters the caller passes as non-nil. Returns an error
+// if every argument is nil — that would otherwise send a no-op gcode.
+func (c *Client) SetVelocityLimit(velocity, accel, squareCornerVelocity, minCruiseRatio *float64) error {
+	parts := []string{"SET_VELOCITY_LIMIT"}
+	if velocity != nil {
+		parts = append(parts, fmt.Sprintf("VELOCITY=%g", *velocity))
+	}
+	if accel != nil {
+		parts = append(parts, fmt.Sprintf("ACCEL=%g", *accel))
+	}
+	if squareCornerVelocity != nil {
+		parts = append(parts, fmt.Sprintf("SQUARE_CORNER_VELOCITY=%g", *squareCornerVelocity))
+	}
+	if minCruiseRatio != nil {
+		parts = append(parts, fmt.Sprintf("MIN_CRUISE_RATIO=%g", *minCruiseRatio))
+	}
+	if len(parts) == 1 {
+		return fmt.Errorf("set velocity limit: no parameters to set")
+	}
+	return c.GcodeScript(strings.Join(parts, " "))
 }

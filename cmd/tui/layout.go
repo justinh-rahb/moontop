@@ -51,15 +51,17 @@ type layout struct {
 	tableBoxW   int
 	jogBoxW     int
 	filesBoxW   int
+	tuningBoxW  int
 	consoleBoxW int
 
-	// Wide mode: shared outer height for the top row (temp + jog + files).
+	// Wide mode: shared outer height for the top row.
 	topRowH int
 
 	// Stacked mode: per-pane outer heights.
-	tableH int
-	jogH   int
-	filesH int
+	tableH  int
+	jogH    int
+	filesH  int
+	tuningH int
 
 	// Console pane: viewport (inner content) height.
 	consoleViewportH int
@@ -108,20 +110,25 @@ func computeLayout(termW, termH, sensorCount int) layout {
 	return computeWide(availW, availH, sensorCount)
 }
 
-// computeWide: temp + jog + files side by side on top, console below.
-// Top-row width budget: temp 50%, files 30%, jog ~26 fixed.
+// computeWide: temp + jog + tuning + files side by side on top,
+// console below. Width budget: jog and tuning are roughly fixed (they
+// hold compact widgets), files takes a chunk, table absorbs the rest.
 func computeWide(availW, availH, sensorCount int) layout {
 	jogBoxW := 26
-	if jogBoxW > availW/4 {
-		jogBoxW = availW / 4
+	if jogBoxW > availW/5 {
+		jogBoxW = availW / 5
 	}
-	filesBoxW := (availW - jogBoxW) * 3 / 8
+	tuningBoxW := 30
+	if tuningBoxW > availW/5 {
+		tuningBoxW = availW / 5
+	}
+	filesBoxW := (availW - jogBoxW - tuningBoxW) * 1 / 3
 	if filesBoxW < 28 {
 		filesBoxW = 28
 	}
-	tableBoxW := availW - jogBoxW - filesBoxW
-	if tableBoxW < 36 {
-		tableBoxW = 36
+	tableBoxW := availW - jogBoxW - tuningBoxW - filesBoxW
+	if tableBoxW < 32 {
+		tableBoxW = 32
 	}
 
 	tableContentW := tableBoxW - panelInnerXReserve()
@@ -130,29 +137,26 @@ func computeWide(availW, availH, sensorCount int) layout {
 	}
 
 	// Outer top-row height = max(pane inner needs) + borders.
-	// Inner = title(1) + table-header(1) + sensor rows.
 	tableInner := 2 + sensorCount
-	jogInner := 1 + jogContentMin // title + jog body
-	filesInner := 1 + 8           // title + ~8 rows minimum
+	jogInner := 1 + jogContentMin   // title + jog body
+	filesInner := 1 + 8             // title + ~8 rows minimum
+	tuningInner := 1 + tuningRowsMin // title + label/input rows + error line
 	innerH := tableInner
-	if jogInner > innerH {
-		innerH = jogInner
+	for _, h := range []int{jogInner, filesInner, tuningInner} {
+		if h > innerH {
+			innerH = h
+		}
 	}
-	if filesInner > innerH {
-		innerH = filesInner
-	}
-	topRowH := innerH + 2 // +2 borders, no padding rows
+	topRowH := innerH + 2
 	if topRowH > availH-5 {
-		topRowH = availH - 5 // keep at least ~5 lines for console
+		topRowH = availH - 5
 		if topRowH < 8 {
 			topRowH = 8
 		}
 	}
 
-	// Console gets all remaining height; its inner block is
-	// title(1) + viewport + input(1).
 	consoleOuter := availH - topRowH
-	consoleViewportH := consoleOuter - 2 - 1 - 1 // borders + title + input
+	consoleViewportH := consoleOuter - 2 - 1 - 1
 	if consoleViewportH < 3 {
 		consoleViewportH = 3
 	}
@@ -162,33 +166,38 @@ func computeWide(availW, availH, sensorCount int) layout {
 		tableBoxW:        tableBoxW,
 		jogBoxW:          jogBoxW,
 		filesBoxW:        filesBoxW,
+		tuningBoxW:       tuningBoxW,
 		consoleBoxW:      availW,
 		topRowH:          topRowH,
 		consoleViewportH: consoleViewportH,
 		inputW:           availW - panelInnerXReserve() - 2,
 		tableContentW:    tableContentW,
 		filesContentW:    filesBoxW - panelInnerXReserve(),
-		filesContentH:    topRowH - 2 - 1, // -borders -title
+		filesContentH:    topRowH - 2 - 1,
 	}
 }
 
-// computeStacked: narrow terminal — temp, jog, files, console all
-// full-width and stacked vertically.
+// tuningRowsMin counts the inner lines the tuning pane needs:
+// 4 fields × (label + input) + 1 line for inline errors = 9.
+const tuningRowsMin = 9
+
+// computeStacked: narrow terminal — every pane full-width, stacked.
 func computeStacked(availW, availH, sensorCount int) layout {
 	tableInner := 2 + sensorCount
 	jogInner := 1 + jogContentMin
-	filesInner := 1 + 6 // title + 6 rows
+	filesInner := 1 + 6
+	tuningInner := 1 + tuningRowsMin
 
 	tableH := tableInner + 2
 	jogH := jogInner + 2
 	filesH := filesInner + 2
+	tuningH := tuningInner + 2
 
-	consoleOuter := availH - tableH - jogH - filesH
+	consoleOuter := availH - tableH - jogH - filesH - tuningH
 	if consoleOuter < 7 {
-		// Squeeze the files pane first, then the table.
 		consoleOuter = 7
-		over := availH - tableH - jogH - filesH - consoleOuter
-		// over is negative if we overflow.
+		over := availH - tableH - jogH - filesH - tuningH - consoleOuter
+		// over is negative if we overflow — shrink files first, then table.
 		for over < 0 && filesH > 6 {
 			filesH--
 			over++
@@ -214,10 +223,12 @@ func computeStacked(availW, availH, sensorCount int) layout {
 		tableBoxW:        availW,
 		jogBoxW:          availW,
 		filesBoxW:        availW,
+		tuningBoxW:       availW,
 		consoleBoxW:      availW,
 		tableH:           tableH,
 		jogH:             jogH,
 		filesH:           filesH,
+		tuningH:          tuningH,
 		consoleViewportH: consoleViewportH,
 		inputW:           availW - panelInnerXReserve() - 2,
 		tableContentW:    contentW,
@@ -294,6 +305,9 @@ func renderFooter(f focusArea, job printJob) string {
 	case focusFiles:
 		paneName = "Files"
 		paneKeys = "↑/↓: select  •  /: filter  •  enter: print"
+	case focusTuning:
+		paneName = "Tuning"
+		paneKeys = "↑/↓: field  •  enter: apply"
 	}
 	left := footerFocusStyle.Render(paneName)
 	mid := footerStyle.Render("  " + paneKeys)

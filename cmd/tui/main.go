@@ -12,6 +12,7 @@ import (
 	"log"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -62,7 +63,47 @@ type initMsg struct {
 	sensors  map[string]*sensorState
 	position [3]float64
 	job      printJob
+	limits   limits
 	err      error
+}
+
+// limits mirrors the kinematic-tuning fields shown in the tuning pane.
+// Populated from toolhead status updates (subset that Klipper exposes)
+// and edited by the user via SET_VELOCITY_LIMIT.
+type limits struct {
+	Velocity             float64
+	Accel                float64
+	SquareCornerVelocity float64
+	MinCruiseRatio       float64
+	// MinCruiseRatioKnown indicates whether the live status reported a
+	// MinCruiseRatio value. Older Klippers don't expose it via toolhead;
+	// when false we treat the field as write-only.
+	MinCruiseRatioKnown bool
+}
+
+// tuningField identifies one of the four limit inputs.
+type tuningField int
+
+const (
+	tuningVelocity tuningField = iota
+	tuningAccel
+	tuningSqCornerV
+	tuningMinCruise
+	tuningFieldCount
+)
+
+func (f tuningField) label() string {
+	switch f {
+	case tuningVelocity:
+		return "Velocity"
+	case tuningAccel:
+		return "Acceleration"
+	case tuningSqCornerV:
+		return "Sq. Corner Vel"
+	case tuningMinCruise:
+		return "Min Cruise Ratio"
+	}
+	return "?"
 }
 
 // filesLoadedMsg arrives once ListFiles returns. Files is sorted with
@@ -127,6 +168,7 @@ const (
 	focusConsole
 	focusJog
 	focusFiles
+	focusTuning
 )
 
 // ---------------------------------------------------------------------------
@@ -148,10 +190,20 @@ type model struct {
 	// Current print job state (from print_stats).
 	job printJob
 
+	// Kinematic limits (from toolhead status, edited via tuning pane).
+	limits limits
+
 	table    table.Model
 	viewport viewport.Model
 	input    textinput.Model
 	files    list.Model
+
+	// Tuning pane: one textinput per editable field, plus inner-focus
+	// index and per-field dirty bits.
+	tuningInputs [tuningFieldCount]textinput.Model
+	tuningFocus  tuningField
+	tuningDirty  [tuningFieldCount]bool
+	tuningErr    string
 
 	// Console log lines; viewport content is rebuilt from this on append.
 	logLines []string
@@ -217,15 +269,25 @@ func initialModel(client *moonraker.Client) model {
 	files.SetShowHelp(false)
 	files.SetFilteringEnabled(true)
 
+	var tuningInputs [tuningFieldCount]textinput.Model
+	for i := range tuningInputs {
+		ti := textinput.New()
+		ti.Prompt = ""
+		ti.CharLimit = 12
+		ti.Width = 10
+		tuningInputs[i] = ti
+	}
+
 	return model{
-		client:    client,
-		sensors:   make(map[string]*sensorState),
-		viewport:  vp,
-		input:     ti,
-		files:     files,
-		focus:     focusTable,
-		stepIndex: 2, // 10 mm
-		job:       printJob{State: "standby"},
+		client:       client,
+		sensors:      make(map[string]*sensorState),
+		viewport:     vp,
+		input:        ti,
+		files:        files,
+		tuningInputs: tuningInputs,
+		focus:        focusTable,
+		stepIndex:    2, // 10 mm
+		job:          printJob{State: "standby"},
 	}
 }
 
@@ -321,7 +383,11 @@ func (m model) initialize() tea.Cmd {
 
 		// Add toolhead + print_stats alongside the heaters — same
 		// subscription, just more objects in the request map.
-		subMap["toolhead"] = []string{"position"}
+		subMap["toolhead"] = []string{
+			"position",
+			"max_velocity", "max_accel",
+			"square_corner_velocity", "minimum_cruise_ratio",
+		}
 		subMap["print_stats"] = []string{"state", "filename", "print_duration"}
 
 		initial, err := m.client.Subscribe(subMap)
@@ -337,9 +403,10 @@ func (m model) initialize() tea.Cmd {
 		}
 		var position [3]float64
 		job := printJob{State: "standby"}
-		mergeStatus(sensors, &position, &job, initial.Objects)
+		var lim limits
+		mergeStatus(sensors, &position, &job, &lim, initial.Objects)
 
-		return initMsg{sensors: sensors, position: position, job: job}
+		return initMsg{sensors: sensors, position: position, job: job, limits: lim}
 	}
 }
 
@@ -386,6 +453,7 @@ func mergeStatus(
 	sensors map[string]*sensorState,
 	position *[3]float64,
 	job *printJob,
+	lim *limits,
 	objects map[string]map[string]any,
 ) {
 	for name, fields := range objects {
@@ -398,6 +466,27 @@ func mergeStatus(
 							position[i] = f
 						}
 					}
+				}
+			}
+			if v, ok := fields["max_velocity"]; ok {
+				if f, ok := v.(float64); ok {
+					lim.Velocity = f
+				}
+			}
+			if v, ok := fields["max_accel"]; ok {
+				if f, ok := v.(float64); ok {
+					lim.Accel = f
+				}
+			}
+			if v, ok := fields["square_corner_velocity"]; ok {
+				if f, ok := v.(float64); ok {
+					lim.SquareCornerVelocity = f
+				}
+			}
+			if v, ok := fields["minimum_cruise_ratio"]; ok {
+				if f, ok := v.(float64); ok {
+					lim.MinCruiseRatio = f
+					lim.MinCruiseRatioKnown = true
 				}
 			}
 		case name == "print_stats":
@@ -499,6 +588,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.handleJogKey(msg)
 		case focusFiles:
 			return m, m.handleFilesKey(msg)
+		case focusTuning:
+			return m, m.handleTuningKey(msg)
 		}
 
 	case tea.WindowSizeMsg:
@@ -517,17 +608,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sensorNames = sortedKeys(msg.sensors)
 		m.position = msg.position
 		m.job = msg.job
+		m.limits = msg.limits
 		m.ready = true
 		m.buildTable()
 		m.resizeLayout()
 		m.rebuildRows()
+		m.refreshTuningInputs()
 
 	case statusMsg:
 		if !m.ready {
 			return m, m.listenUpdates()
 		}
-		mergeStatus(m.sensors, &m.position, &m.job, msg.Objects)
+		mergeStatus(m.sensors, &m.position, &m.job, &m.limits, msg.Objects)
 		m.rebuildRows()
+		m.refreshTuningInputs()
 		return m, m.listenUpdates()
 
 	case gcodeRespMsg:
@@ -564,6 +658,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case tuningAppliedMsg:
+		if msg.err != nil {
+			m.appendLog(fmt.Sprintf("!! set velocity limit: %v", msg.err))
+		}
+		return m, nil
+
 	case errMsg:
 		m.err = msg.err
 		return m, nil
@@ -573,9 +673,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) toggleFocus() {
-	// table → jog → console → files → table …
+	// table → jog → console → files → tuning → table …
 	// Confirmation is now global (not files-pane-scoped), so Tab no
 	// longer needs to clear it — it survives focus changes intentionally.
+	leaving := m.focus
 	switch m.focus {
 	case focusTable:
 		m.focus = focusJog
@@ -586,7 +687,17 @@ func (m *model) toggleFocus() {
 		m.focus = focusFiles
 		m.input.Blur()
 	case focusFiles:
+		m.focus = focusTuning
+		m.setInnerFocus(0)
+	case focusTuning:
 		m.focus = focusTable
+	}
+	// Leaving the tuning pane: blur the active textinput so its cursor
+	// stops blinking elsewhere on screen.
+	if leaving == focusTuning {
+		for i := range m.tuningInputs {
+			m.tuningInputs[i].Blur()
+		}
 	}
 }
 
@@ -611,6 +722,141 @@ func (m *model) handleFilesKey(msg tea.KeyMsg) tea.Cmd {
 	m.files, cmd = m.files.Update(msg)
 	return cmd
 }
+
+// ---------------------------------------------------------------------------
+// Tuning pane
+// ---------------------------------------------------------------------------
+
+// refreshTuningInputs copies the live limit values into each textinput
+// EXCEPT for fields the user is currently editing — dirty bits (touched
+// since the last successful apply) and the inner-focused field are
+// both protected, so live status updates never stomp on in-flight typing.
+func (m *model) refreshTuningInputs() {
+	vals := [tuningFieldCount]float64{
+		m.limits.Velocity,
+		m.limits.Accel,
+		m.limits.SquareCornerVelocity,
+		m.limits.MinCruiseRatio,
+	}
+	known := [tuningFieldCount]bool{true, true, true, m.limits.MinCruiseRatioKnown}
+	for i := range m.tuningInputs {
+		if m.tuningDirty[i] {
+			continue
+		}
+		if m.focus == focusTuning && tuningField(i) == m.tuningFocus {
+			continue
+		}
+		if !known[i] {
+			continue
+		}
+		m.tuningInputs[i].SetValue(formatLimit(vals[i]))
+	}
+}
+
+// formatLimit formats a float for display in the tuning inputs. Trims
+// trailing zeros so 1500 doesn't show as "1500.000000".
+func formatLimit(f float64) string {
+	return strconv.FormatFloat(f, 'f', -1, 64)
+}
+
+// setInnerFocus moves inner focus inside the tuning pane to field idx.
+// Tracks textinput Focus/Blur so the cursor blinks on exactly one field.
+func (m *model) setInnerFocus(idx tuningField) {
+	if idx < 0 || int(idx) >= int(tuningFieldCount) {
+		return
+	}
+	for i := range m.tuningInputs {
+		if tuningField(i) == idx {
+			m.tuningInputs[i].Focus()
+		} else {
+			m.tuningInputs[i].Blur()
+		}
+	}
+	m.tuningFocus = idx
+}
+
+// handleTuningKey routes keys while the tuning pane is outer-focused.
+// up/down move inner focus between the four fields; Enter applies any
+// dirty fields via SET_VELOCITY_LIMIT; everything else feeds the
+// currently focused textinput. Outer Tab is handled upstream — it
+// never reaches this function — so inner navigation can't collide with
+// pane cycling.
+func (m *model) handleTuningKey(msg tea.KeyMsg) tea.Cmd {
+	switch msg.String() {
+	case "up":
+		next := m.tuningFocus - 1
+		if next < 0 {
+			next = tuningFieldCount - 1
+		}
+		m.setInnerFocus(next)
+		return nil
+	case "down":
+		next := m.tuningFocus + 1
+		if int(next) >= int(tuningFieldCount) {
+			next = 0
+		}
+		m.setInnerFocus(next)
+		return nil
+	case "enter":
+		return m.applyTuning()
+	}
+
+	var cmd tea.Cmd
+	m.tuningInputs[m.tuningFocus], cmd = m.tuningInputs[m.tuningFocus].Update(msg)
+	// Any keystroke other than navigation marks the field dirty so
+	// the next status update won't overwrite it.
+	m.tuningDirty[m.tuningFocus] = true
+	// Clear stale error as soon as the user starts typing again.
+	m.tuningErr = ""
+	return cmd
+}
+
+// applyTuning parses every dirty field, validates, and (if all parse
+// cleanly) sends a single SET_VELOCITY_LIMIT with only those fields.
+// Validation errors surface inline in m.tuningErr — no send happens.
+func (m *model) applyTuning() tea.Cmd {
+	var parsed [tuningFieldCount]*float64
+	for i := range m.tuningInputs {
+		if !m.tuningDirty[i] {
+			continue
+		}
+		raw := strings.TrimSpace(m.tuningInputs[i].Value())
+		if raw == "" {
+			continue
+		}
+		v, err := strconv.ParseFloat(raw, 64)
+		if err != nil {
+			m.tuningErr = fmt.Sprintf("%s: not a number", tuningField(i).label())
+			return nil
+		}
+		if v < 0 {
+			m.tuningErr = fmt.Sprintf("%s: must be ≥ 0", tuningField(i).label())
+			return nil
+		}
+		copied := v
+		parsed[i] = &copied
+	}
+	// If nothing was dirty there's nothing to send.
+	if parsed == ([tuningFieldCount]*float64{}) {
+		m.tuningErr = "no changes to apply"
+		return nil
+	}
+	m.tuningErr = ""
+	for i := range m.tuningDirty {
+		m.tuningDirty[i] = false
+	}
+
+	client := m.client
+	v, a, s, c := parsed[tuningVelocity], parsed[tuningAccel], parsed[tuningSqCornerV], parsed[tuningMinCruise]
+	return func() tea.Msg {
+		return tuningAppliedMsg{err: client.SetVelocityLimit(v, a, s, c)}
+	}
+}
+
+// tuningAppliedMsg surfaces send errors from SET_VELOCITY_LIMIT into
+// the console log; success is silent (the next toolhead status update
+// will reflect the new values).
+type tuningAppliedMsg struct{ err error }
 
 // handleJobControl dispatches p/r/c global keypresses based on the
 // current job state. Returns (cmd, true) when the key was a recognized
@@ -870,6 +1116,13 @@ func (m model) View() string {
 		m.layout.filesBoxW,
 		paneHeight(m.layout, focusFiles),
 	)
+	tuningPane := renderPanel(
+		"Tuning",
+		m.renderTuning(),
+		m.focus == focusTuning,
+		m.layout.tuningBoxW,
+		paneHeight(m.layout, focusTuning),
+	)
 	consolePane := renderPanel(
 		"Console",
 		m.viewport.View()+"\n"+m.input.View(),
@@ -881,10 +1134,10 @@ func (m model) View() string {
 	var stacked string
 	switch m.layout.mode {
 	case layoutWide:
-		top := lipgloss.JoinHorizontal(lipgloss.Top, tablePane, jogPane, filesPane)
+		top := lipgloss.JoinHorizontal(lipgloss.Top, tablePane, jogPane, tuningPane, filesPane)
 		stacked = lipgloss.JoinVertical(lipgloss.Left, top, consolePane)
 	default: // stacked
-		stacked = lipgloss.JoinVertical(lipgloss.Left, tablePane, jogPane, filesPane, consolePane)
+		stacked = lipgloss.JoinVertical(lipgloss.Left, tablePane, jogPane, tuningPane, filesPane, consolePane)
 	}
 	body := bodyStyle.Render(stacked)
 
@@ -903,12 +1156,30 @@ func (m model) renderFiles() string {
 	return m.files.View()
 }
 
+func (m model) renderTuning() string {
+	lines := make([]string, 0, int(tuningFieldCount)*2+1)
+	for i := 0; i < int(tuningFieldCount); i++ {
+		f := tuningField(i)
+		label := jogHintStyle.Render(f.label())
+		if m.focus == focusTuning && f == m.tuningFocus {
+			label = jogStepStyle.Render("▸ " + f.label())
+		} else {
+			label = jogHintStyle.Render("  " + f.label())
+		}
+		lines = append(lines, label, "  "+m.tuningInputs[i].View())
+	}
+	if m.tuningErr != "" {
+		lines = append(lines, errStyle.Render(m.tuningErr))
+	}
+	return strings.Join(lines, "\n")
+}
+
 // paneHeight returns the outer height for a given pane in the current
 // layout — wide mode shares one top-row height, stacked mode has
 // per-pane heights.
 func paneHeight(l layout, f focusArea) int {
 	if l.mode == layoutWide {
-		if f == focusTable || f == focusJog || f == focusFiles {
+		if f == focusTable || f == focusJog || f == focusFiles || f == focusTuning {
 			return l.topRowH
 		}
 		return 0
@@ -920,6 +1191,8 @@ func paneHeight(l layout, f focusArea) int {
 		return l.jogH
 	case focusFiles:
 		return l.filesH
+	case focusTuning:
+		return l.tuningH
 	}
 	return 0
 }
