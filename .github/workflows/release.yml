@@ -51,7 +51,7 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         if: steps.changelog.outputs.skip == 'false'
         with:
           go-version-file: go.mod
