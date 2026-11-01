@@ -50,9 +50,9 @@ checksum:
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
-changelog:
-  # Release notes come from CHANGELOG.md via --release-notes.
-  disable: true
+# No changelog section: release notes come from scripts/release-notes.sh
+# via --release-notes. (changelog.disable: true made GoReleaser drop
+# those notes too, which left v0.1.0 and v0.2.0 with empty bodies.)
 
 release:
   github:

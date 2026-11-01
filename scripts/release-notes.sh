@@ -29,11 +29,17 @@ if [ -z "$(printf '%s' "$section" | tr -d '[:space:]')" ]; then
 	exit 1
 fi
 
+# The release's commits end at its tag once it exists (rebuilding old
+# notes), else at HEAD (cutting it now). The previous release is the
+# highest tag below this version.
+end=HEAD
+git rev-parse -q --verify "refs/tags/v$version" >/dev/null && end="v$version"
 if [ -z "$prev" ]; then
-	prev=$(git tag --list 'v*' --sort=-v:refname | grep -vx "v$version" | head -1 || true)
+	prev=$(git tag --list 'v*' | grep -vx "v$version" | { cat; echo "v$version"; } |
+		sort -V | awk -v t="v$version" '$0 == t { print p; exit } { p = $0 }')
 fi
-range=HEAD
-[ -n "$prev" ] && range="$prev..HEAD"
+range=$end
+[ -n "$prev" ] && range="$prev..$end"
 
 # Everyone who wrote code for this release, except the maintainer,
 # bots and AI assistants (they're tooling, not contributors).

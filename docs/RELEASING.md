@@ -32,6 +32,9 @@ Releases are driven by `CHANGELOG.md`. Nothing is tagged by hand.
    someone deciding whether to update. Preview with
    `sh scripts/release-notes.sh 0.2.0`.
 
+To rewrite a published release's notes (after fixing its changelog entry):
+Actions → **Release notes** → Run workflow, with the version.
+
    It can also be started by hand from the Actions tab (*Release → Run workflow*),
    e.g. to retry after fixing a secret.
 

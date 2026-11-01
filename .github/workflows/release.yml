@@ -72,3 +72,11 @@ jobs:
           args: release --clean --release-notes ${{ runner.temp }}/notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Make sure the release carries the notes, whatever GoReleaser did
+      # with them.
+      - name: Set the release notes
+        if: steps.changelog.outputs.skip == 'false'
+        run: gh release edit "${{ steps.changelog.outputs.tag }}" --notes-file "$RUNNER_TEMP/notes.md"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

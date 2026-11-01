@@ -1,0 +1,32 @@
+name: Release notes
+
+# Rebuilds a published release's notes from CHANGELOG.md
+# (scripts/release-notes.sh) — e.g. after fixing a changelog entry.
+# Actions → Release notes → Run workflow, with the version.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to rewrite the notes of (e.g. 0.2.0)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  notes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Build and set the notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          v="${VERSION#v}"
+          sh scripts/release-notes.sh "$v" > notes.md
+          cat notes.md
+          gh release edit "v$v" --notes-file notes.md
