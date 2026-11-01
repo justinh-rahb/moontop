@@ -17,6 +17,15 @@ Releases are cut from this file: adding a `## [x.y.z] - YYYY-MM-DD` heading on
   connect at start (the screen still opens if it can't be reached).
 - Humidity in Temperatures for sensors that measure it (a column that appears
   only when one does). Suggested by jimmyjon711.
+- Camera: `Ctrl+T` swaps pane 5 between the gcode console and the printer's
+  webcam. The pane plays that camera's H.264 stream through ffmpeg (the
+  WebRTC camera, when Moonraker has one). Ghostty, Kitty, and WezTerm draw
+  the frames sharp; other terminals, and tmux without `allow-passthrough on`,
+  draw quadrant blocks (four pixels per cell). `b` on the camera cycles
+  sharp 960, sharp 640, sharp 480, quadrant blocks, and half blocks. The
+  640 and 480 rungs decode a smaller picture, and the block rungs stay on
+  the 480 decode. If the stream is unavailable, the pane falls back to the
+  JPEG snapshot. See [docs/CAMERA.md](docs/CAMERA.md).
 
 ### Changed
 
