@@ -9,43 +9,53 @@ Releases are cut from this file: adding a `## [x.y.z] - YYYY-MM-DD` heading on
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-01
+
+Your printer's camera comes to the terminal, and AFC printers look the way
+they do in Fluidd. Pane 5 swaps between the console and the webcam with
+`Ctrl+T`, drawn sharp in Ghostty, Kitty and WezTerm and in block characters
+anywhere else, following the cameras your printer has configured. Macro
+output that Mainsail and Fluidd show in colour (AFC's lane status and banners)
+is coloured here too, instead of arriving as raw HTML. Switching printers no
+longer means quitting, a default printer connects at start, and sensors that
+measure humidity show it.
+
 ### Added
 
-- `P` in the dashboard goes back to the connection screen to switch printers,
-  without quitting.
-- A default printer: `ctrl+s` on the connection screen makes the selected one
-  connect at start (the screen still opens if it can't be reached).
-- Humidity in Temperatures for sensors that measure it (a column that appears
-  only when one does). Suggested by jimmyjon711.
-- Camera: `Ctrl+T` swaps pane 5 between the gcode console and the printer's
-  webcam. The pane plays that camera's H.264 stream through ffmpeg (the
-  WebRTC camera, when Moonraker has one). Ghostty, Kitty, and WezTerm draw
-  the frames sharp; other terminals, and tmux without `allow-passthrough on`,
-  draw quadrant blocks (four pixels per cell). `b` on the camera cycles
-  sharp 960, sharp 640, sharp 480, quadrant blocks, and half blocks. The
-  640 and 480 rungs decode a smaller picture, and the block rungs stay on
-  the 480 decode. If the stream is unavailable, the pane falls back to the
-  JPEG snapshot. The pane follows the printer's `[webcam]` config: enabled
-  cameras in Moonraker's order (`n` for the next), each service played the
-  way it's meant to be, and `rotation`, `flip_horizontal`, `flip_vertical` and
-  `target_fps` applied. See [docs/CAMERA.md](docs/CAMERA.md). Contributed by
-  djsplice.
+- **Camera** (`Ctrl+T` in the console pane), contributed by djsplice. Live
+  H.264, MJPEG, HLS and RTSP streams play through `ffmpeg`; other cameras
+  show their snapshot. Ghostty, Kitty and WezTerm draw the picture sharp with
+  the Kitty graphics protocol (inside tmux with `allow-passthrough on`); every
+  other terminal draws quadrant or half blocks. `b` steps the picture through
+  960, 640 and 480 pixels and the two block styles, trading detail for CPU.
+  The pane follows the printer's `[webcam]` sections the way Mainsail, Fluidd
+  and retrograde do: enabled cameras in their configured order (`n` for the
+  next), each `service` played as intended, and `rotation`,
+  `flip_horizontal`, `flip_vertical` and `target_fps` applied. How it works:
+  [docs/CAMERA.md](docs/CAMERA.md).
+- **Switch printers** with `P` from the dashboard, back to the connection
+  screen without quitting.
+- **A default printer:** `ctrl+s` on the connection screen makes the selected
+  one connect at start. If it can't be reached, the screen opens and says why.
+- **Humidity** in Temperatures for sensors that measure it (BME280, SHT3x,
+  HTU21D…); the column appears only when one does. Suggested by jimmyjon711.
 
 ### Changed
 
-- AFC lane and tool weights round to two decimals (`609.24g`, not
-  `609.2385417798512g`). Suggested by jimmyjon711.
-- Macro output written for Mainsail and Fluidd's HTML (AFC's
-  `<span class=success--text>…</span>`, its coloured ASCII banners) is shown
-  in colour in the console, with the tags gone — spans that run across
-  lines included. `moontop gcode` prints it as plain text. Suggested by
-  jimmyjon711.
-- The installer explains how to pick up `~/.local/bin` when it isn't on `PATH`
-  yet.
-- The installer has a shorter address on the website:
-  `curl -fsSL https://justinh-rahb.github.io/moontop/install.sh | sh`.
-- `phosphor` and `amber` draw unfocused pane borders brighter, so they hold up
-  in CRT emulators such as Cool Retro Term.
+- **Macro output in colour.** Text that macros write for Mainsail and Fluidd
+  (AFC's `<span class=success--text>LOCKED AND LOADED</span>`, its ASCII
+  READY banner) is coloured from your theme, with the tags gone — spans that
+  run across lines included. `moontop gcode` prints it as plain text.
+  Suggested by jimmyjon711.
+- **AFC weights** round to two decimals: `609.24g`, not `609.2385417798512g`.
+  Suggested by jimmyjon711.
+- **Shorter installer address:**
+  `curl -fsSL https://justinh-rahb.github.io/moontop/install.sh | sh` (the old
+  raw GitHub one still works). When `~/.local/bin` isn't on your `PATH` yet,
+  it now says how to pick it up.
+- **`phosphor` and `amber`** draw unfocused pane borders brighter, so they
+  survive CRT emulators such as Cool Retro Term.
+- Release notes now include who contributed and how to install.
 
 ## [0.1.0] - 2026-11-01
 
@@ -96,5 +106,6 @@ through Moonraker, covering what you reach for in Mainsail or Fluidd.
 - Builds for Linux, macOS, Windows and FreeBSD on amd64 and arm64 (and armv7
   on Linux), an install script, and `go install`.
 
-[Unreleased]: https://github.com/justinh-rahb/moontop/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/justinh-rahb/moontop/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/justinh-rahb/moontop/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/justinh-rahb/moontop/releases/tag/v0.1.0
