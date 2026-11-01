@@ -39,13 +39,9 @@ jobs:
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # Notes = everything between this heading and the next `## [` heading.
-          awk -v v="$version" '
-            $0 ~ "^## \\[" v "\\]" { on=1; next }
-            on && /^## \[/ { exit }
-            on && /^\[[^]]+\]: / { next }
-            on { print }
-          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          # Notes: the changelog section, contributors since the last
+          # tag, install instructions and the compare link.
+          sh scripts/release-notes.sh "$version" > "$RUNNER_TEMP/notes.md"
           echo "--- release notes ---"; cat "$RUNNER_TEMP/notes.md"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"

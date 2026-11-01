@@ -87,11 +87,17 @@ jobs:
           retention-days: 7
 
   install-script:
-    name: install.sh
+    name: install.sh and release notes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - run: sh -n install.sh
-      - run: shellcheck install.sh
+      - run: shellcheck install.sh scripts/release-notes.sh
+      - name: Release notes build for the latest version
+        run: |
+          v=$(grep -m1 -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+[^]]*\]' CHANGELOG.md | sed -E 's/^## \[(.*)\]/\1/')
+          sh scripts/release-notes.sh "$v"
       - name: The website's copy matches
         run: cmp install.sh docs/install.sh || { echo "::error::docs/install.sh differs from install.sh; copy it over"; exit 1; }

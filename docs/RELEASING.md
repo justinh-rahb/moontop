@@ -23,7 +23,14 @@ Releases are driven by `CHANGELOG.md`. Nothing is tagged by hand.
    - reads the first `## [x.y.z]` heading;
    - stops if tag `vx.y.z` already exists;
    - runs the tests, creates and pushes the tag;
-   - runs GoReleaser with that section of the changelog as the release notes.
+   - runs GoReleaser with notes from `scripts/release-notes.sh`: that section
+     of the changelog, a thanks line for contributors since the previous tag
+     (commit authors and `Co-authored-by`, not the maintainer or bots), install
+     instructions and a compare link.
+
+   The section's opening paragraph is the release's summary: write it for
+   someone deciding whether to update. Preview with
+   `sh scripts/release-notes.sh 0.2.0`.
 
    It can also be started by hand from the Actions tab (*Release → Run workflow*),
    e.g. to retry after fixing a secret.
