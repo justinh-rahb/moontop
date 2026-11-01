@@ -113,7 +113,11 @@ main() {
 	say "installed $("$dir/moontop" version 2>/dev/null || echo "v$version") to $dir/moontop"
 	case ":$PATH:" in
 	*":$dir:"*) ;;
-	*) say "note: $dir is not on your PATH" ;;
+	*)
+		say "note: $dir isn't on your PATH yet."
+		say "  Most systems add ~/.local/bin at login once it exists: log out and back in,"
+		say "  or for now run: export PATH=\"$dir:\$PATH\""
+		;;
 	esac
 }
 

@@ -146,16 +146,16 @@ func TestPaneOrderAndWidths(t *testing.T) {
 
 func TestColumns(t *testing.T) {
 	var c Columns
-	if strings.Join(c.Temps(), ",") != "state,current,target,history" || strings.Join(c.FileCols(), ",") != "size" {
+	if strings.Join(c.Temps(), ",") != "state,current,humidity,target,history" || strings.Join(c.FileCols(), ",") != "size" {
 		t.Fatal("defaults")
 	}
 	c.ToggleTemp("power")
 	c.ToggleTemp("state")
 	c.ToggleTemp("history")
-	if got := strings.Join(c.Temps(), ","); got != "current,target,power" {
+	if got := strings.Join(c.Temps(), ","); got != "current,humidity,target,power" {
 		t.Fatalf("temps %s", got)
 	}
-	if got := strings.Join(c.Temperatures, ","); got != "current,target,power" {
+	if got := strings.Join(c.Temperatures, ","); got != "current,humidity,target,power" {
 		t.Fatalf("stored out of display order: %s", got)
 	}
 	c.ToggleTemp("current")

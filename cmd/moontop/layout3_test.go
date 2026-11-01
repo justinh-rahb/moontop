@@ -103,7 +103,7 @@ func TestPowerColumn(t *testing.T) {
 		t.Fatalf("extruder fields %v", params.Objects["extruder"])
 	}
 	m = openCategory(t, m, "Columns")
-	m = press(t, m, "down", "down", "down", "space") // power
+	m = press(t, m, "down", "down", "down", "down", "space") // power
 	m = press(t, m, "esc", "esc")
 	if strings.Join(m.tempCols, ",") != "current,target,power,history" {
 		t.Fatalf("cols %v", m.tempCols)

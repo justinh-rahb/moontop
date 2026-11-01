@@ -280,7 +280,7 @@ Live adjustments, applied the moment you press a key — during a print too.
 
 ### 4 · Temperatures
 
-Every heater and sensor, with state, current, target, heater power and a **braille sparkline** of the last five minutes (each character is two samples at four heights, filled from Moonraker's temperature store on connect).
+Every heater and sensor, with state, current, target, heater power, **humidity** for sensors that measure it (BME280, SHT3x, HTU21D… — the column appears only when one does) and a **braille sparkline** of the last five minutes (each character is two samples at four heights, filled from Moonraker's temperature store on connect).
 
 | Key | |
 | --- | --- |
@@ -570,7 +570,7 @@ Moontop is meant to be hard to hurt a printer with.
 | Category | Settings | Saved to |
 | --- | --- | --- |
 | **Panes** | Show / hide each pane, top-row order, width shares, console height | config file |
-| **Columns** | Temperatures: State, Current, Target, Power, History · Files: size, modified, sort | config file |
+| **Columns** | Temperatures: State, Current, Humidity, Target, Power, History · Files: size, modified, sort | config file |
 | **Temperatures** | Hide sensors, rename heaters | printer |
 | **Console** | Heat-wait and TMC filters, your own regex filters | config file |
 | **Toolhead** | Jog step sizes, XY and Z feedrates | config file |

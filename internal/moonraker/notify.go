@@ -3,6 +3,8 @@ package moonraker
 import (
 	"encoding/json"
 	"fmt"
+	"html"
+	"regexp"
 )
 
 // Notification method names Moonraker pushes that consumers commonly
@@ -53,5 +55,19 @@ func ParseGcodeResponse(params []json.RawMessage) (string, error) {
 	if err := json.Unmarshal(params[0], &msg); err != nil {
 		return "", fmt.Errorf("gcode response: %w", err)
 	}
-	return msg, nil
+	return StripMarkup(msg), nil
+}
+
+// markupTag matches the few HTML tags macros write for Mainsail and
+// Fluidd to render, e.g. AFC's <span class=info--text>…</span>.
+var markupTag = regexp.MustCompile(`(?i)</?(span|b|i|u|a|br|div|p|strong|em|font|small|code)(\s[^<>]*)?/?>`)
+
+// StripMarkup removes those tags (and, when there were any, decodes the
+// HTML entities they came with), so a terminal shows the text. A line
+// without tags is returned unchanged: "<" in "x < 5" stays.
+func StripMarkup(s string) string {
+	if !markupTag.MatchString(s) {
+		return s
+	}
+	return html.UnescapeString(markupTag.ReplaceAllString(s, ""))
 }

@@ -227,3 +227,11 @@ func TestAFCLayoutAndSetup(t *testing.T) {
 		t.Fatal("hidden AFC still takes space")
 	}
 }
+
+func TestAFCWeightRounded(t *testing.T) {
+	for in, want := range map[float64]string{609.2385417798512: "609.24", 500: "500", 0: "0", 112.068782: "112.07", 0.004: "0"} {
+		if got := weightText(in); got != want {
+			t.Errorf("weightText(%v) = %q, want %q", in, got, want)
+		}
+	}
+}

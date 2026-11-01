@@ -197,6 +197,10 @@ type sensorState struct {
 	Target   float64
 	Power    float64 // 0–1, heaters only
 	HasPower bool
+	// Relative humidity, from sensors that measure it (BME280, SHT3x,
+	// HTU21D, AHT10…).
+	Humidity    float64
+	HasHumidity bool
 }
 
 func (s *sensorState) stateLabel() string {
@@ -653,7 +657,7 @@ func (m model) initialize() tea.Cmd {
 			if isSensorObject(name) {
 				// power only exists on heaters; Moonraker simply omits
 				// fields an object doesn't have.
-				subMap[name] = []string{"temperature", "target", "power"}
+				subMap[name] = []string{"temperature", "target", "power", "humidity"}
 			}
 			if extruderHeater.MatchString(name) {
 				// The Extruder pane: cold-extrusion guard and pressure advance.
@@ -863,6 +867,11 @@ func mergeStatus(
 			if v, ok := fields["power"]; ok {
 				if f, ok := v.(float64); ok {
 					s.Power, s.HasPower = f, true
+				}
+			}
+			if v, ok := fields["humidity"]; ok {
+				if f, ok := v.(float64); ok {
+					s.Humidity, s.HasHumidity = f, true
 				}
 			}
 		}
@@ -1472,13 +1481,16 @@ func (m *model) resizeLayout() {
 // bubbles/table cells carry 1 column of padding on each side.
 func (m *model) setTableColumns() {
 	const minNameW = 12
-	widths := map[string]int{"state": 9, "current": 9, "target": 9, "power": 6, "history": historyMinW}
-	titles := map[string]string{"state": "State", "current": "Current", "target": "Target", "power": "Power", "history": "History"}
+	widths := map[string]int{"state": 9, "current": 9, "humidity": 8, "target": 9, "power": 6, "history": historyMinW}
+	titles := map[string]string{"state": "State", "current": "Current", "humidity": "Humidity", "target": "Target", "power": "Power", "history": "History"}
 
 	// The configured columns, minus whatever doesn't fit — State first
 	// (it restates Target), then History, then Power.
 	// bubbles/table pads each cell by one column on each side.
 	cols := m.cfg.Columns.Temps()
+	if !m.anyHumidity() {
+		cols = without(cols, "humidity") // only when a sensor measures it
+	}
 	need := func(cs []string) int {
 		n := minNameW + 2
 		for _, c := range cs {
@@ -1487,7 +1499,7 @@ func (m *model) setTableColumns() {
 		return n
 	}
 	w := m.layout.tableContentW
-	for _, drop := range []string{"state", "history", "power"} {
+	for _, drop := range []string{"state", "history", "power", "humidity"} {
 		if need(cols) <= w {
 			break
 		}
@@ -1561,6 +1573,12 @@ func (m *model) rebuildRows() {
 				row = append(row, s.stateLabel())
 			case "current":
 				row = append(row, fmt.Sprintf("%.1f°C", s.Current))
+			case "humidity":
+				h := "—"
+				if s.HasHumidity {
+					h = fmt.Sprintf("%.0f%%", s.Humidity)
+				}
+				row = append(row, h)
 			case "target":
 				row = append(row, targetStr)
 			case "power":
@@ -1577,6 +1595,16 @@ func (m *model) rebuildRows() {
 	}
 	m.table.SetRows(rows)
 	m.clampTableCursor()
+}
+
+// anyHumidity reports whether a shown sensor measures humidity.
+func (m *model) anyHumidity() bool {
+	for _, n := range m.shownSensors {
+		if s := m.sensors[n]; s != nil && s.HasHumidity {
+			return true
+		}
+	}
+	return false
 }
 
 func hasTarget(name string) bool {

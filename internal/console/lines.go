@@ -64,7 +64,7 @@ func BackfillLines(entries []moonraker.GcodeStoreEntry) []string {
 	var lines []string
 	for _, e := range entries {
 		if e.Type != "command" {
-			lines = append(lines, strings.Split(e.Message, "\n")...)
+			lines = append(lines, strings.Split(moonraker.StripMarkup(e.Message), "\n")...)
 			continue
 		}
 		var cmds []string

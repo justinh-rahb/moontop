@@ -15,9 +15,17 @@ Releases are cut from this file: adding a `## [x.y.z] - YYYY-MM-DD` heading on
   without quitting.
 - A default printer: `ctrl+s` on the connection screen makes the selected one
   connect at start (the screen still opens if it can't be reached).
+- Humidity in Temperatures for sensors that measure it (a column that appears
+  only when one does). Suggested by jimmyjon711.
 
 ### Changed
 
+- AFC lane and tool weights round to two decimals (`609.24g`, not
+  `609.2385417798512g`). Suggested by jimmyjon711.
+- HTML that macros write for Mainsail and Fluidd (AFC's
+  `<span class=info--text>…</span>`) is stripped from console lines.
+- The installer explains how to pick up `~/.local/bin` when it isn't on `PATH`
+  yet.
 - The installer has a shorter address on the website:
   `curl -fsSL https://justinh-rahb.github.io/moontop/install.sh | sh`.
 - `phosphor` and `amber` draw unfocused pane borders brighter, so they hold up

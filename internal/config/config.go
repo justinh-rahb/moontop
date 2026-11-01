@@ -146,8 +146,8 @@ type Columns struct {
 
 // Column choices, in display order.
 var (
-	TempColumns        = []string{"state", "current", "target", "power", "history"}
-	DefaultTempColumns = []string{"state", "current", "target", "history"}
+	TempColumns        = []string{"state", "current", "humidity", "target", "power", "history"}
+	DefaultTempColumns = []string{"state", "current", "humidity", "target", "history"}
 	FileColumns        = []string{"size", "modified"}
 	DefaultFileColumns = []string{"size"}
 )
@@ -176,7 +176,9 @@ func (c *Columns) SortByName() bool { return c.FilesSort == "name" }
 func (c *Columns) ToggleTemp(col string) bool {
 	cur := c.Temps()
 	next := setMember(append([]string(nil), cur...), col, !contains(cur, col))
-	if len(next) == 0 {
+	// Humidity only shows with a sensor that measures it, so it can't be
+	// the only column.
+	if len(next) == 0 || len(next) == 1 && next[0] == "humidity" {
 		return false
 	}
 	c.Temperatures = pick(TempColumns, next, nil) // stored in display order

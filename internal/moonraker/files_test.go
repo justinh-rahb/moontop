@@ -79,3 +79,17 @@ func TestUploadResultBothShapes(t *testing.T) {
 		}
 	}
 }
+
+func TestStripMarkup(t *testing.T) {
+	for in, want := range map[string]string{
+		`<span class=info--text>Saved afc_bowden_length:1619.84 in AFC_hub EMU_HUB_2</span>`: "Saved afc_bowden_length:1619.84 in AFC_hub EMU_HUB_2",
+		`<span class="error--text">Lane &lt;3&gt; jammed</span>`:                             "Lane <3> jammed",
+		`<b>bold</b> and <br/>break`:                                                         "bold and break",
+		`// value < 5 and > 2`:                                                               `// value < 5 and > 2`,
+		`echo: 3 &lt; 4`:                                                                     `echo: 3 &lt; 4`,
+	} {
+		if got := moonraker.StripMarkup(in); got != want {
+			t.Errorf("StripMarkup(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

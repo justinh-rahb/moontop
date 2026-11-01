@@ -88,8 +88,12 @@ func (m *model) onStatusUpdate(params []json.RawMessage) tea.Cmd {
 		// No subscription snapshot yet; initMsg will carry full state.
 		return nil
 	}
+	hadHumidity := m.anyHumidity()
 	mergeStatus(m.sensors, &m.position, &m.job, &m.limits, &m.klippy, m.raw, update.Objects)
 	m.klippyChanged()
+	if m.anyHumidity() != hadHumidity {
+		m.setTableColumns() // the Humidity column comes and goes with the sensors
+	}
 	m.rebuildRows()
 	// Drive the progress bar toward the live percent; snap to 0
 	// between prints so the next one starts from empty.

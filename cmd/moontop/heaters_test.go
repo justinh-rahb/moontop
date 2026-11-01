@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/justinh-rahb/moontop/internal/moonraker"
 	"github.com/justinh-rahb/moontop/internal/moonraker/moonrakertest"
 )
 
@@ -244,3 +245,30 @@ func TestPresetPickerEscAndNoPresets(t *testing.T) {
 type errNoNamespace struct{}
 
 func (errNoNamespace) Error() string { return "Namespace 'mainsail' not found" }
+
+// Sensors that measure humidity (BME280, SHT3x…) get a Humidity column;
+// it's absent when none does.
+func TestHumidityColumn(t *testing.T) {
+	srv := fakePrinter(t)
+	srv.Handle("printer.objects.list", moonrakertest.Result(map[string]any{
+		"objects": []string{"webhooks", "toolhead", "extruder", "heater_bed", "temperature_sensor chamber", "print_stats"},
+	}))
+	m := readyModel(t, srv)
+	m = update(t, m, tea.WindowSizeMsg{Width: 160, Height: 40})
+	if strings.Contains(m.table.View(), "Humidity") {
+		t.Fatal("Humidity column without a humidity sensor")
+	}
+	var params struct {
+		Objects map[string][]string `json:"objects"`
+	}
+	_ = json.Unmarshal(srv.CallsTo("printer.objects.subscribe")[0].Params, &params)
+	if !strings.Contains(strings.Join(params.Objects["temperature_sensor chamber"], ","), "humidity") {
+		t.Fatalf("humidity not subscribed: %v", params.Objects)
+	}
+	m = update(t, m, notificationMsg{Method: moonraker.MethodStatusUpdate,
+		Params: rawParams(t, map[string]any{"temperature_sensor chamber": map[string]any{"temperature": 31.2, "humidity": 43.6}}, 1.0)})
+	tv := m.table.View()
+	if !strings.Contains(tv, "Humidity") || !strings.Contains(tv, "44%") || !strings.Contains(tv, "—") {
+		t.Fatalf("table:\n%s", tv)
+	}
+}

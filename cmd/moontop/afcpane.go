@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -168,7 +169,7 @@ var afcSettings = []afcSetting{
 	{key: keys.AfcMaterial, command: afc.SetMat, label: "material", current: func(l *afc.Lane) string { return l.Material }},
 	{key: keys.AfcWeight, command: afc.SetWt, label: "remaining weight in g", current: func(l *afc.Lane) string {
 		if l.HasWeight {
-			return fmt.Sprintf("%g", l.Weight)
+			return weightText(l.Weight)
 		}
 		return ""
 	}},
@@ -346,7 +347,7 @@ func renderLane(l *afc.Lane, cursor bool) string {
 	}
 	weight := ""
 	if l.HasWeight {
-		weight = fmt.Sprintf(" %gg", l.Weight)
+		weight = fmt.Sprintf(" %8s", weightText(l.Weight)+"g")
 	}
 	stateStyle := consoleInfoStyle
 	switch l.State {
@@ -359,4 +360,11 @@ func renderLane(l *afc.Lane, cursor bool) string {
 		stateStyle = consoleCmdStyle // a busy status: Tool Loading, Ejecting…
 	}
 	return fmt.Sprintf("%s%s %s %-5s %-6s%s  %s", mark, swatch, name, tool, mat, weight, stateStyle.Render(l.State))
+}
+
+// weightText is a filament weight to at most two decimals: AFC reports
+// what's left after subtracting extruded length, so 609.2385417798512
+// becomes 609.24 and 500 stays 500.
+func weightText(g float64) string {
+	return trimFloat(math.Round(g*100) / 100)
 }
