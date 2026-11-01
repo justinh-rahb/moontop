@@ -41,6 +41,7 @@ const (
 
 // ClassifyLine reports the Kind of a single (already split) line.
 func ClassifyLine(l string) Kind {
+	l = Plain(l)
 	switch {
 	case strings.HasPrefix(l, PrefixError):
 		return KindError
@@ -64,7 +65,7 @@ func BackfillLines(entries []moonraker.GcodeStoreEntry) []string {
 	var lines []string
 	for _, e := range entries {
 		if e.Type != "command" {
-			lines = append(lines, strings.Split(moonraker.StripMarkup(e.Message), "\n")...)
+			lines = append(lines, MarkupLines(e.Message)...)
 			continue
 		}
 		var cmds []string

@@ -35,8 +35,11 @@ Releases are cut from this file: adding a `## [x.y.z] - YYYY-MM-DD` heading on
 
 - AFC lane and tool weights round to two decimals (`609.24g`, not
   `609.2385417798512g`). Suggested by jimmyjon711.
-- HTML that macros write for Mainsail and Fluidd (AFC's
-  `<span class=info--text>…</span>`) is stripped from console lines.
+- Macro output written for Mainsail and Fluidd's HTML (AFC's
+  `<span class=success--text>…</span>`, its coloured ASCII banners) is shown
+  in colour in the console, with the tags gone — spans that run across
+  lines included. `moontop gcode` prints it as plain text. Suggested by
+  jimmyjon711.
 - The installer explains how to pick up `~/.local/bin` when it isn't on `PATH`
   yet.
 - The installer has a shorter address on the website:

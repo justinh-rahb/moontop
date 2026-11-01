@@ -55,7 +55,7 @@ func ParseGcodeResponse(params []json.RawMessage) (string, error) {
 	if err := json.Unmarshal(params[0], &msg); err != nil {
 		return "", fmt.Errorf("gcode response: %w", err)
 	}
-	return StripMarkup(msg), nil
+	return msg, nil
 }
 
 // markupTag matches the few HTML tags macros write for Mainsail and
@@ -63,8 +63,9 @@ func ParseGcodeResponse(params []json.RawMessage) (string, error) {
 var markupTag = regexp.MustCompile(`(?i)</?(span|b|i|u|a|br|div|p|strong|em|font|small|code)(\s[^<>]*)?/?>`)
 
 // StripMarkup removes those tags (and, when there were any, decodes the
-// HTML entities they came with), so a terminal shows the text. A line
-// without tags is returned unchanged: "<" in "x < 5" stays.
+// HTML entities they came with). A line without tags is returned
+// unchanged: "<" in "x < 5" stays. The console keeps span markup to
+// colour it (internal/console/markup.go); this is for plain text.
 func StripMarkup(s string) string {
 	if !markupTag.MatchString(s) {
 		return s

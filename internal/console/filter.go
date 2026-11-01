@@ -32,6 +32,7 @@ var (
 // Hides reports whether line should be hidden. Moontop's own lines
 // (command echoes, notices, errors) are never hidden.
 func (fs FilterSet) Hides(line string) bool {
+	line = Plain(line) // patterns match the text, not macro markup
 	switch ClassifyLine(line) {
 	case KindCommand, KindNotice, KindError:
 		return false

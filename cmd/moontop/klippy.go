@@ -112,7 +112,7 @@ func (m *model) onGcodeResponse(params []json.RawMessage) tea.Cmd {
 	if prompt.IsPromptLine(line) || strings.Contains(line, "action:prompt_") {
 		m.promptLive = true
 	}
-	for _, l := range m.feedPromptLines(strings.Split(line, "\n")) {
+	for _, l := range m.feedPromptLines(console.MarkupLines(line)) {
 		m.appendLog(l)
 	}
 	return nil
@@ -280,17 +280,59 @@ func (m model) loadGcodeStore() tea.Cmd {
 // styleConsoleLine maps the shared line classification to the
 // dashboard's console styles.
 func styleConsoleLine(l string) string {
-	switch console.ClassifyLine(l) {
+	var base lipgloss.Style
+	plain := console.Plain(l)
+	switch console.ClassifyLine(plain) {
 	case console.KindError:
-		return consoleErrStyle.Render(l)
+		base = consoleErrStyle
 	case console.KindInfo:
-		return consoleInfoStyle.Render(l)
+		base = consoleInfoStyle
 	case console.KindCommand:
-		return consoleCmdStyle.Render(l)
+		base = consoleCmdStyle
 	case console.KindNotice:
-		return consoleNoticeStyle.Render(l)
+		base = consoleNoticeStyle
+	default:
+		if !console.HasMarkup(l) {
+			return l
+		}
+		base = lipgloss.NewStyle()
 	}
-	return l
+	if !console.HasMarkup(l) {
+		return base.Render(l)
+	}
+	// Macro markup: each span in its colour, the rest as the line's kind.
+	var b strings.Builder
+	for _, seg := range console.Segments(l) {
+		st := base
+		if s, ok := markupStyle(seg.Class); ok {
+			st = s
+		}
+		b.WriteString(st.Render(seg.Text))
+	}
+	return b.String()
+}
+
+// markupStyle colours the classes Mainsail and Fluidd style
+// (Vuetify's success--text, error--text…) from the theme.
+func markupStyle(class string) (lipgloss.Style, bool) {
+	c := strings.ToLower(class)
+	switch {
+	case c == "":
+		return lipgloss.Style{}, false
+	case strings.Contains(c, "success"):
+		return consoleNoticeStyle, true
+	case strings.Contains(c, "error"), strings.Contains(c, "danger"):
+		return consoleErrStyle, true
+	case strings.Contains(c, "warning"):
+		return consoleCmdStyle, true
+	case strings.Contains(c, "info"):
+		return markupInfoStyle, true
+	case strings.Contains(c, "primary"), strings.Contains(c, "accent"):
+		return jogPadStyle, true
+	case strings.Contains(c, "secondary"), strings.Contains(c, "grey"), strings.Contains(c, "muted"):
+		return consoleInfoStyle, true
+	}
+	return lipgloss.Style{}, false
 }
 
 // renderKlippyBanner is the one-line state banner shown between the

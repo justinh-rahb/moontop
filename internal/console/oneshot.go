@@ -131,7 +131,8 @@ func (r *Runner) handle(n moonraker.Notification) {
 	if err != nil {
 		return
 	}
-	for _, l := range strings.Split(msg, "\n") {
+	for _, l := range MarkupLines(msg) {
+		l = Plain(l) // a pipe or log file gets text, not HTML
 		if r.Filter.Hides(l) {
 			r.Hidden++
 			continue

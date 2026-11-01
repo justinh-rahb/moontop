@@ -318,7 +318,7 @@ func (m *replModel) handleNotification(n notificationMsg) (print, follow tea.Cmd
 		if err != nil {
 			return nil, nil
 		}
-		return m.printKlipper(strings.Split(line, "\n")...), nil
+		return m.printKlipper(console.MarkupLines(line)...), nil
 	case moonraker.MethodKlippyReady:
 		// Same path as startup: re-check (which also reloads the
 		// completion list — macros may have changed with the config).

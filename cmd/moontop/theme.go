@@ -32,6 +32,7 @@ type theme struct {
 	err, ok                      lipgloss.TerminalColor
 	onDanger                     lipgloss.TerminalColor // text on an err background
 	rule, selectedBg             lipgloss.TerminalColor // table header rule, selected row
+	info                         lipgloss.TerminalColor // macro "info" text; nil = cool
 	text                         lipgloss.TerminalColor // plain text; nil = the terminal's own
 }
 
@@ -42,7 +43,7 @@ func col(s string) lipgloss.Color { return lipgloss.Color(s) }
 var themes = []theme{
 	{name: "moontop", about: "the original: blue panes, pink focus, amber accents",
 		borderBlurred: col("63"), borderFocused: col("205"), title: col("229"), muted: col("241"),
-		warm: col("214"), cool: col("205"), err: col("203"), ok: col("78"), onDanger: col("231"), rule: col("240"), selectedBg: col("236")},
+		warm: col("214"), cool: col("205"), err: col("203"), ok: col("78"), onDanger: col("231"), rule: col("240"), selectedBg: col("236"), info: col("75")},
 	{name: "phosphor", about: "all green, like a P1 phosphor monitor",
 		borderBlurred: col("#2e8a48"), borderFocused: col("#5cf08d"), title: col("#a6f7bf"), muted: col("#3f8a55"),
 		warm: col("#7dff9e"), cool: col("#5cf08d"), err: col("#d4ffe0"), ok: col("#39d26a"), onDanger: col("#03140a"), rule: col("#2e8a48"), selectedBg: col("#0d2a17"), text: col("#7fd99a")},
@@ -101,6 +102,10 @@ func applyTheme(name string) {
 	colorErr, colorOk = t.err, t.ok
 	colorOnDanger, colorRule, colorSelectedBg = t.onDanger, t.rule, t.selectedBg
 	colorText = t.text
+	colorInfo = t.info
+	if colorInfo == nil {
+		colorInfo = t.cool
+	}
 	buildStyles()
 }
 
@@ -112,7 +117,7 @@ var (
 	colorAccentWarm, colorAccentCool       lipgloss.TerminalColor
 	colorErr, colorOk                      lipgloss.TerminalColor
 	colorOnDanger, colorRule               lipgloss.TerminalColor
-	colorSelectedBg, colorText             lipgloss.TerminalColor
+	colorSelectedBg, colorText, colorInfo  lipgloss.TerminalColor
 )
 
 // tintView gives unstyled text the theme's text colour: it starts each
@@ -152,7 +157,7 @@ var (
 	consoleCmdStyle, consoleNoticeStyle                  lipgloss.Style
 	helpGroupStyle, helpKeyStyle, setupCursorStyle       lipgloss.Style
 	replPromptStyle, bannerStyle, dangerPromptStyle      lipgloss.Style
-	connLabelStyle                                       lipgloss.Style
+	connLabelStyle, markupInfoStyle                      lipgloss.Style
 )
 
 func buildStyles() {
@@ -224,6 +229,8 @@ func buildStyles() {
 		Background(colorErr).
 		Bold(true).
 		Padding(0, 1)
+
+	markupInfoStyle = lipgloss.NewStyle().Foreground(colorInfo)
 
 	// Connection manager labels.
 	connLabelStyle = lipgloss.NewStyle().Foreground(colorTextMuted).Width(10)

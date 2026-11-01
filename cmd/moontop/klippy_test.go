@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/justinh-rahb/moontop/internal/moonraker"
 	"github.com/justinh-rahb/moontop/internal/moonraker/moonrakertest"
@@ -441,4 +442,35 @@ func methods(calls []moonrakertest.Call) []string {
 		out[i] = c.Method
 	}
 	return out
+}
+
+// AFC's coloured output: the dashboard keeps the spans and colours them,
+// filters and classification see plain text.
+func TestConsoleColoursMacroMarkup(t *testing.T) {
+	m := readyModel(t, fakePrinter(t))
+	msg := "lane2 tool cmd: <span class=info--text>T1</span>  <span class=success--text>LOCKED AND LOADED</span>\n<span class=success--text>R  ___\nY |_|</span>"
+	m = update(t, m, notificationMsg{Method: moonraker.MethodGcodeResponse, Params: rawParams(t, msg)})
+	if !logContains(m, "LOCKED AND LOADED") {
+		t.Fatal("line missing")
+	}
+	v := m.View()
+	for _, bad := range []string{"<span", "</span>", "class="} {
+		if strings.Contains(v, bad) {
+			t.Fatalf("markup shown: %q\n%s", bad, v)
+		}
+	}
+	for _, want := range []string{"lane2 tool cmd: T1  LOCKED AND LOADED", "R  ___", "Y |_|"} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("view lacks %q:\n%s", want, v)
+		}
+	}
+	// Each class gets a colour from the theme.
+	for class, want := range map[string]lipgloss.Style{"success--text": consoleNoticeStyle, "error--text": consoleErrStyle, "warning--text": consoleCmdStyle, "info--text": markupInfoStyle} {
+		if got, ok := markupStyle(class); !ok || got.GetForeground() != want.GetForeground() {
+			t.Errorf("%s: %v %v", class, ok, got.GetForeground())
+		}
+	}
+	if _, ok := markupStyle("some-other-class"); ok {
+		t.Error("unknown classes should keep the line's colour")
+	}
 }
