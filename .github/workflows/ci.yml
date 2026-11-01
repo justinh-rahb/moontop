@@ -77,7 +77,7 @@ jobs:
         run: |
           bin=$(find dist -type f -path '*linux_amd64*' -name moontop | head -1)
           "$bin" version
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: snapshot
           path: |
