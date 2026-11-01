@@ -68,7 +68,7 @@ jobs:
           git tag -a "${{ steps.changelog.outputs.tag }}" -m "moontop ${{ steps.changelog.outputs.tag }}"
           git push origin "${{ steps.changelog.outputs.tag }}"
 
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@v7
         if: steps.changelog.outputs.skip == 'false'
         with:
           distribution: goreleaser
