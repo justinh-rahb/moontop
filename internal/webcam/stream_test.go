@@ -71,7 +71,15 @@ func TestFFmpegArgs(t *testing.T) {
 			t.Fatal("scale filter is an input option")
 		}
 	}
-	for _, bad := range []string{"file:///etc/passwd", "-hide_banner", "http:///nohost", "not a url"} {
+	slow, err := ffmpegArgsFPS(url, FrameWide, 5)
+	if err != nil || !strings.Contains(strings.Join(slow, " "), "fps=5,scale=960:-2") {
+		t.Fatalf("target_fps 5: %q %v", slow, err)
+	}
+	rtsp, err := ffmpegArgsFPS("rtsp://cam.local/stream1", FrameSmall, 12)
+	if err != nil || !strings.Contains(strings.Join(rtsp, " "), "-rtsp_transport tcp -i rtsp://cam.local/stream1") {
+		t.Fatalf("rtsp: %q %v", rtsp, err)
+	}
+	for _, bad := range []string{"file:///etc/passwd", "-hide_banner", "http:///nohost", "not a url", "ftp://cam/x"} {
 		if _, err := ffmpegArgs(bad, FrameWide); err == nil {
 			t.Errorf("ffmpegArgs(%q) accepted", bad)
 		}

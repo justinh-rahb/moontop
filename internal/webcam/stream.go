@@ -61,14 +61,24 @@ const (
 // probe makes ffmpeg drop those first pictures and sometimes exit.
 // width is FrameWide, FrameNarrow, or FrameSmall; anything else uses FrameWide.
 func ffmpegArgs(rawURL string, width int) ([]string, error) {
+	return ffmpegArgsFPS(rawURL, width, 12)
+}
+
+// ffmpegArgsFPS is ffmpegArgs at the camera's frame rate (1–12). The
+// input may be raw H.264, an MJPEG stream, HLS, or (ipstream) RTSP.
+func ffmpegArgsFPS(rawURL string, width, fps int) ([]string, error) {
 	u, err := url.Parse(rawURL)
-	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || strings.HasPrefix(rawURL, "-") {
-		return nil, fmt.Errorf("stream url must be http or https")
+	okScheme := u != nil && (u.Scheme == "http" || u.Scheme == "https" || u.Scheme == "rtsp" || u.Scheme == "rtsps")
+	if err != nil || u.Host == "" || !okScheme || strings.HasPrefix(rawURL, "-") {
+		return nil, fmt.Errorf("stream url must be http, https or rtsp")
 	}
 	if width != FrameWide && width != FrameNarrow && width != FrameSmall {
 		width = FrameWide
 	}
-	return []string{
+	if fps < 1 || fps > 12 {
+		fps = 12
+	}
+	args := []string{
 		"-hide_banner",
 		"-loglevel", "error",
 		"-nostdin",
@@ -76,14 +86,19 @@ func ffmpegArgs(rawURL string, width int) ([]string, error) {
 		"-flags", "low_delay",
 		"-probesize", "500000",
 		"-analyzeduration", "500000",
+	}
+	if strings.HasPrefix(u.Scheme, "rtsp") {
+		args = append(args, "-rtsp_transport", "tcp")
+	}
+	return append(args,
 		"-i", rawURL,
 		"-an",
-		"-vf", fmt.Sprintf("fps=12,scale=%d:-2", width),
+		"-vf", fmt.Sprintf("fps=%d,scale=%d:-2", fps, width),
 		"-f", "image2pipe",
 		"-vcodec", "mjpeg",
 		"-q:v", "8",
 		"pipe:1",
-	}, nil
+	), nil
 }
 
 // Play runs ffmpeg on the H.264 URL and calls yield with each decoded
@@ -91,11 +106,11 @@ func ffmpegArgs(rawURL string, width int) ([]string, error) {
 // stops the decode. A cancelled ctx kills ffmpeg and returns ctx.Err.
 // Frames that are not valid JPEG are skipped, because the first
 // packets after joining the stream often are.
-func Play(ctx context.Context, rawURL string, width int, yield func(image.Image) error) error {
+func Play(ctx context.Context, rawURL string, width, fps int, yield func(image.Image) error) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	args, err := ffmpegArgs(rawURL, width)
+	args, err := ffmpegArgsFPS(rawURL, width, fps)
 	if err != nil {
 		return err
 	}

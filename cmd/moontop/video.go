@@ -15,18 +15,12 @@ import (
 	"github.com/justinh-rahb/moontop/internal/webcam"
 )
 
-// How often a visible camera asks for a new snapshot when the H.264
-// stream is not running. A live stream paces itself (ffmpeg drops it
-// to 12 fps) and does not use this ticker.
-const cameraInterval = 250 * time.Millisecond
-
-// camReadyMsg is the chosen camera.
+// camReadyMsg is Moonraker's camera list, reduced to the ones the pane
+// can show, in configured order.
 type camReadyMsg struct {
-	name   string
-	url    string
-	stream string
-	gen    int
-	err    error
+	cams []webcam.Cam
+	gen  int
+	err  error
 }
 
 // camFrameMsg is one picture, either a snapshot or a decoded H.264
@@ -95,35 +89,66 @@ func (m *model) lookupCamera() tea.Cmd {
 		cams := make([]webcam.Cam, len(list))
 		for i, w := range list {
 			cams[i] = webcam.Cam{
-				Name: w.Name, Service: w.Service,
+				Name: w.Name, UID: w.UID, Service: w.Service,
 				StreamURL: w.StreamURL, SnapshotURL: w.SnapshotURL,
-				Enabled: w.Enabled,
+				Enabled: w.Enabled, TargetFPS: int(w.TargetFPS),
+				FlipH: w.FlipHorizontal, FlipV: w.FlipVertical, Rotation: int(w.Rotation),
 			}
 		}
-		cam, ok := webcam.Pick(cams)
-		if !ok {
-			return camReadyMsg{gen: gen, err: fmt.Errorf("no webcam with a snapshot")}
+		usable := webcam.Usable(cams)
+		if len(usable) == 0 {
+			return camReadyMsg{gen: gen, err: fmt.Errorf("no enabled webcam the terminal can show (add one under [webcam] in moonraker.conf)")}
 		}
-		stream := ""
-		if path := webcam.H264Path(cam.StreamURL, cam.SnapshotURL); path != "" {
-			stream = webcam.Resolve(c.Host(), path)
-		}
-		return camReadyMsg{
-			gen: gen, name: cam.Name,
-			url:    webcam.Resolve(c.Host(), cam.SnapshotURL),
-			stream: stream,
-		}
+		return camReadyMsg{gen: gen, cams: usable}
 	}
+}
+
+// useCamera points the pane at camera i of camList: its stream and
+// snapshot, resolved against the printer's address.
+func (m *model) useCamera(i int) {
+	if len(m.camList) == 0 {
+		return
+	}
+	i = (i + len(m.camList)) % len(m.camList)
+	m.camIndex = i
+	cam := m.camList[i]
+	m.camCfg = cam
+	m.camName = cam.Name
+	src := webcam.SourcesFor(cam)
+	m.camURL = webcam.Resolve(m.client.Host(), src.Snapshot)
+	m.camStream = ""
+	if src.Stream != "" {
+		m.camStream = webcam.Resolve(m.client.Host(), src.Stream)
+	}
+}
+
+// nextCamera moves to the printer's next enabled camera.
+func (m *model) nextCamera() tea.Cmd {
+	if len(m.camList) < 2 {
+		return nil
+	}
+	m.camGen++
+	m.stopStream()
+	m.camImg, m.camPNG, m.camPaint = nil, nil, ""
+	m.useCamera(m.camIndex + 1)
+	return m.openCamera()
+}
+
+// cameraInterval is the snapshot poll period from the camera's
+// target_fps (at most 10 a second: each one is an HTTP request).
+func (m *model) cameraInterval() time.Duration {
+	return time.Second / time.Duration(m.camCfg.FPS(10))
 }
 
 func (m *model) fetchCamera() tea.Cmd {
 	url := m.camURL
 	gen := m.camGen
+	cam := m.camCfg
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		img, err := webcam.Fetch(ctx, url)
-		return camFrameMsg{img: img, gen: gen, err: err}
+		return camFrameMsg{img: webcam.Orient(img, cam), gen: gen, err: err}
 	}
 }
 
@@ -148,12 +173,14 @@ func (m *model) startStream() tea.Cmd {
 	rawURL := m.camStream
 	width := m.streamWidth()
 	encode := m.pngEncode()
+	cam := m.camCfg
 	go func() {
 		defer close(ch)
-		err := webcam.Play(ctx, rawURL, width, func(img image.Image) error {
+		err := webcam.Play(ctx, rawURL, width, cam.FPS(12), func(img image.Image) error {
 			if len(ch) == cap(ch) {
 				return nil
 			}
+			img = webcam.Orient(img, cam)
 			msg := camFrameMsg{img: img, gen: gen, live: true}
 			if encode.Load() {
 				var buf bytes.Buffer
@@ -216,9 +243,16 @@ func (m *model) onCamReady(msg camReadyMsg) tea.Cmd {
 		m.camErr = msg.err.Error()
 		return nil
 	}
-	m.camName = msg.name
-	m.camURL = msg.url
-	m.camStream = msg.stream
+	// Stay on the camera chosen before (by uid, else name) if it's
+	// still there; otherwise the printer's first.
+	i := 0
+	for k, c := range msg.cams {
+		if m.camCfg.Name != "" && (c.UID != "" && c.UID == m.camCfg.UID || c.UID == "" && c.Name == m.camCfg.Name) {
+			i = k
+		}
+	}
+	m.camList = msg.cams
+	m.useCamera(i)
 	return m.openCamera()
 }
 
@@ -264,7 +298,7 @@ func (m *model) onCamFrame(msg camFrameMsg) tea.Cmd {
 		return nil
 	}
 	gen := m.camGen
-	return tea.Tick(cameraInterval, func(time.Time) tea.Msg {
+	return tea.Tick(m.cameraInterval(), func(time.Time) tea.Msg {
 		return camPollMsg{gen: gen}
 	})
 }

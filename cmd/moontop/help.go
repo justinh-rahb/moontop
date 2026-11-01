@@ -247,6 +247,8 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.toggleCamera()
 		case key.Matches(msg, *keys.CameraDetail) && m.showVideo && m.focus == focusConsole:
 			return m, m.cycleCameraDetail()
+		case key.Matches(msg, *keys.CameraNext) && m.showVideo && m.focus == focusConsole && len(m.camList) > 1:
+			return m, m.nextCamera()
 		}
 		// A key the focused pane binds itself (c = Z down in Toolhead)
 		// goes to the pane, not to the job or Klipper controls.

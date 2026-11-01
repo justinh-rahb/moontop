@@ -18,39 +18,137 @@ import (
 	"time"
 )
 
-// Cam is one webcam from server.webcams.list, reduced to the fields
-// the dashboard uses to choose and draw it.
+// Cam is one webcam from server.webcams.list: what the dashboard needs
+// to choose it, play it and show it the way the printer's config says
+// (Moonraker's [webcam] sections, the same ones Mainsail and Fluidd read).
 type Cam struct {
 	Name        string
+	UID         string
 	Service     string
 	StreamURL   string
 	SnapshotURL string
 	Enabled     bool
+	TargetFPS   int
+	FlipH       bool
+	FlipV       bool
+	Rotation    int // 0, 90, 180 or 270, clockwise
 }
 
-// Pick chooses the camera to show. A WebRTC camera wins, because that
-// is the stream the printer's player page uses. Anything else enabled
-// and with a snapshot is the fallback.
-func Pick(cams []Cam) (Cam, bool) {
-	var fallback Cam
-	have := false
+// Sources is what the pane can play for a camera: a live stream for
+// ffmpeg and/or a snapshot to poll. Both are as configured (maybe
+// relative); Resolve makes them absolute.
+type Sources struct {
+	Stream   string
+	Snapshot string
+}
+
+// SourcesFor follows the camera's Moonraker service:
+//
+//	mjpegstreamer, uv4l-mjpeg      the MJPEG stream, live
+//	mjpegstreamer-adaptive         the snapshot, polled at target_fps
+//	webrtc-camerastreamer          the stream.h264 beside the player page
+//	hlsstream, ipstream            the stream URL, live (ffmpeg reads it)
+//	webrtc-go2rtc, -mediamtx,
+//	-janus, jmuxer-stream, iframe  the snapshot only (no terminal decoder)
+//
+// An unknown service gets a stream.h264 sibling if it has one, else the
+// snapshot.
+func SourcesFor(c Cam) Sources {
+	snap := strings.TrimSpace(c.SnapshotURL)
+	stream := strings.TrimSpace(c.StreamURL)
+	switch strings.ToLower(c.Service) {
+	case "mjpegstreamer", "uv4l-mjpeg":
+		return Sources{Stream: stream, Snapshot: snap}
+	case "mjpegstreamer-adaptive":
+		return Sources{Snapshot: snap}
+	case "webrtc-camerastreamer":
+		return Sources{Stream: H264Path(stream, snap), Snapshot: snap}
+	case "hlsstream", "ipstream":
+		return Sources{Stream: stream, Snapshot: snap}
+	case "webrtc-go2rtc", "webrtc-mediamtx", "webrtc-janus", "jmuxer-stream", "iframe":
+		return Sources{Snapshot: snap}
+	}
+	return Sources{Stream: H264Path(stream, snap), Snapshot: snap}
+}
+
+// Usable is the cameras the pane can show, in Moonraker's order (the
+// order of the [webcam] sections, which Mainsail and Fluidd keep too):
+// enabled, with a stream or a snapshot to play.
+func Usable(cams []Cam) []Cam {
+	var out []Cam
 	for _, c := range cams {
-		if !c.Enabled || strings.TrimSpace(c.SnapshotURL) == "" {
+		if !c.Enabled {
 			continue
 		}
-		if isWebRTC(c) {
-			return c, true
+		if s := SourcesFor(c); s.Stream == "" && s.Snapshot == "" {
+			continue
 		}
-		if !have {
-			fallback, have = c, true
-		}
+		out = append(out, c)
 	}
-	return fallback, have
+	return out
 }
 
-func isWebRTC(c Cam) bool {
-	s := strings.ToLower(c.Service + " " + c.StreamURL)
-	return strings.Contains(s, "webrtc")
+// Pick is the first usable camera.
+func Pick(cams []Cam) (Cam, bool) {
+	u := Usable(cams)
+	if len(u) == 0 {
+		return Cam{}, false
+	}
+	return u[0], true
+}
+
+// FPS is the camera's target_fps for the pane: Moonraker's default (15)
+// when unset, at most max.
+func (c Cam) FPS(max int) int {
+	f := c.TargetFPS
+	if f <= 0 {
+		f = 15
+	}
+	return min(f, max)
+}
+
+// Orient applies the camera's configured rotation and flips, as the web
+// front ends do with CSS. Rotation is clockwise, after flipping.
+func Orient(img image.Image, c Cam) image.Image {
+	if img == nil || (!c.FlipH && !c.FlipV && c.Rotation%360 == 0) {
+		return img
+	}
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	rot := ((c.Rotation % 360) + 360) % 360
+	ow, oh := w, h
+	if rot == 90 || rot == 270 {
+		ow, oh = h, w
+	}
+	src := image.NewRGBA(image.Rect(0, 0, w, h))
+	draw.Draw(src, src.Bounds(), img, b.Min, draw.Src)
+	dst := image.NewRGBA(image.Rect(0, 0, ow, oh))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			sx, sy := x, y
+			if c.FlipH {
+				sx = w - 1 - x
+			}
+			if c.FlipV {
+				sy = h - 1 - y
+			}
+			var dx, dy int
+			switch rot {
+			case 90:
+				dx, dy = h-1-y, x
+			case 180:
+				dx, dy = w-1-x, h-1-y
+			case 270:
+				dx, dy = y, w-1-x
+			default:
+				dx, dy = x, y
+			}
+			si := src.PixOffset(sx, sy)
+			di := dst.PixOffset(dx, dy)
+			copy(dst.Pix[di:di+4], src.Pix[si:si+4])
+		}
+	}
+	return dst
 }
 
 // Resolve makes a snapshot URL absolute. Relative paths on a plain

@@ -4,11 +4,27 @@ Pane 5 (`Ctrl+T`) is either the gcode console or the printer's webcam. This is h
 
 ## Choosing a camera
 
-`server.webcams.list` supplies the cameras. An enabled WebRTC camera wins. Anything else enabled, with a snapshot URL, is the fallback.
+The cameras are the printer's `[webcam]` sections, from `server.webcams.list`, and the pane follows them the way Mainsail, Fluidd and retrograde do:
 
-The WebRTC URL is the camera's HTML player, not the bytes we decode. A player page or a `snapshot.jpg` has a sibling `stream.h264` (raw Annex-B). That is the live picture. An MJPEG camera (`?action=stream`) has no such sibling, so the pane stays on snapshots.
+- **Order and enabled.** Disabled cameras are skipped. The first enabled one is shown; `n` moves through the rest in the printer's order, and the title says `1/3`. The pane comes back to the same camera (by `uid`) after a reconnect.
+- **Service** decides what's played:
 
-Relative paths on a plain `http` Moonraker at port 7125 are rewritten to the printer's port 80 front end. `https` keeps its host and port. An absolute URL is kept as given.
+  | `service` | Played |
+  | --- | --- |
+  | `mjpegstreamer`, `uv4l-mjpeg` | the MJPEG `stream_url`, live through ffmpeg |
+  | `mjpegstreamer-adaptive` | the `snapshot_url`, polled at `target_fps` |
+  | `webrtc-camerastreamer` | the `stream.h264` beside the player page (below) |
+  | `hlsstream`, `ipstream` | the `stream_url` (HLS, HTTP or RTSP), live through ffmpeg |
+  | `webrtc-go2rtc`, `webrtc-mediamtx`, `webrtc-janus`, `jmuxer-stream`, `iframe` | the `snapshot_url` only — there's no terminal decoder for these |
+
+  A camera with neither a playable stream nor a snapshot isn't offered.
+- **`rotation`, `flip_horizontal`, `flip_vertical`** are applied to every frame, snapshot or live, before it's drawn.
+- **`target_fps`** sets the live decode rate (at most 12) and the snapshot poll rate (at most 10 a second); unset means Moonraker's default, 15.
+- **URLs.** An absolute URL is used as given. A relative one is resolved against the printer: on a plain-`http` Moonraker at port 7125 it goes to the same host's port 80 (the web front end's `/webcam/` proxy), otherwise to Moonraker's own scheme, host and port.
+
+`aspect_ratio` isn't used: the frame carries its own shape.
+
+The WebRTC player page isn't something a terminal can play. A `webrtc-camerastreamer` page or its `snapshot.jpg` has a sibling `stream.h264` (raw Annex-B) from camera-streamer, and that's the live picture.
 
 ## Decode
 

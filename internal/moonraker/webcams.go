@@ -4,11 +4,17 @@ import "encoding/json"
 
 // Webcam is one entry from server.webcams.list.
 type Webcam struct {
-	Name        string `json:"name"`
-	Enabled     bool   `json:"enabled"`
-	Service     string `json:"service"`
-	StreamURL   string `json:"stream_url"`
-	SnapshotURL string `json:"snapshot_url"`
+	Name           string  `json:"name"`
+	UID            string  `json:"uid"`
+	Enabled        bool    `json:"enabled"`
+	Service        string  `json:"service"`
+	StreamURL      string  `json:"stream_url"`
+	SnapshotURL    string  `json:"snapshot_url"`
+	TargetFPS      float64 `json:"target_fps"`
+	FlipHorizontal bool    `json:"flip_horizontal"`
+	FlipVertical   bool    `json:"flip_vertical"`
+	Rotation       float64 `json:"rotation"`
+	AspectRatio    string  `json:"aspect_ratio"`
 }
 
 // Webcams lists the cameras Moonraker knows about.

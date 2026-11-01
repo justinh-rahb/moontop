@@ -105,23 +105,23 @@ func bind(keys []string, help, desc string) *key.Binding {
 
 // keys holds every dashboard binding by name, for handlers.
 var keys = struct {
-	EStop, Quit, Help, Setup, NextPane, PrevPane, JumpPane, ToggleFilter, ToggleCamera, CameraDetail, Jobs, Machine, Updates, BedMesh, Logs, Config, Printers *key.Binding
-	Pause, Resume, Cancel, Exclude                                                                                                                            *key.Binding
-	Restart, FwRestart                                                                                                                                        *key.Binding
-	Confirm, Deny, HelpScroll                                                                                                                                 *key.Binding
-	FilesMove, FilesFilter, FilesStart, FilesQueue, FilesManage                                                                                               *key.Binding
-	JogX, JogY, JogZ, StepDown, StepUp                                                                                                                        *key.Binding
-	ThMove, ThType, ThEdit, ThEditApply, ThEditCancel                                                                                                         *key.Binding
-	HomeAll, HomeX, HomeY, HomeZ, MotorsOff                                                                                                                   *key.Binding
-	FieldMove, FieldAdjust, FieldType, FieldEdit, Extrude, Retract                                                                                            *key.Binding
-	OutputOff, LEDColor                                                                                                                                       *key.Binding
-	Macros, MacroMove, MacroRun, MacroUnpin                                                                                                                   *key.Binding
-	FilLoad, FilUnload, Level, Endstops                                                                                                                       *key.Binding
-	TempsMove, TempSet, TempOff, TempAllOff, TempPreset                                                                                                       *key.Binding
-	TempEditType, TempEditApply, TempEditCancel                                                                                                               *key.Binding
-	ConsoleSend, ConsoleHistory                                                                                                                               *key.Binding
-	AfcMove, AfcLoad, AfcUnload, AfcEject, AfcClear                                                                                                           *key.Binding
-	AfcMap, AfcMaterial, AfcWeight, AfcColor, AfcSpool                                                                                                        *key.Binding
+	EStop, Quit, Help, Setup, NextPane, PrevPane, JumpPane, ToggleFilter, ToggleCamera, CameraDetail, CameraNext, Jobs, Machine, Updates, BedMesh, Logs, Config, Printers *key.Binding
+	Pause, Resume, Cancel, Exclude                                                                                                                                        *key.Binding
+	Restart, FwRestart                                                                                                                                                    *key.Binding
+	Confirm, Deny, HelpScroll                                                                                                                                             *key.Binding
+	FilesMove, FilesFilter, FilesStart, FilesQueue, FilesManage                                                                                                           *key.Binding
+	JogX, JogY, JogZ, StepDown, StepUp                                                                                                                                    *key.Binding
+	ThMove, ThType, ThEdit, ThEditApply, ThEditCancel                                                                                                                     *key.Binding
+	HomeAll, HomeX, HomeY, HomeZ, MotorsOff                                                                                                                               *key.Binding
+	FieldMove, FieldAdjust, FieldType, FieldEdit, Extrude, Retract                                                                                                        *key.Binding
+	OutputOff, LEDColor                                                                                                                                                   *key.Binding
+	Macros, MacroMove, MacroRun, MacroUnpin                                                                                                                               *key.Binding
+	FilLoad, FilUnload, Level, Endstops                                                                                                                                   *key.Binding
+	TempsMove, TempSet, TempOff, TempAllOff, TempPreset                                                                                                                   *key.Binding
+	TempEditType, TempEditApply, TempEditCancel                                                                                                                           *key.Binding
+	ConsoleSend, ConsoleHistory                                                                                                                                           *key.Binding
+	AfcMove, AfcLoad, AfcUnload, AfcEject, AfcClear                                                                                                                       *key.Binding
+	AfcMap, AfcMaterial, AfcWeight, AfcColor, AfcSpool                                                                                                                    *key.Binding
 }{
 	EStop:        bind([]string{"ctrl+x"}, "ctrl+x", "emergency stop (confirms)"),
 	Quit:         bind([]string{"ctrl+c", "f10", "q"}, "q/F10", "quit"),
@@ -133,6 +133,7 @@ var keys = struct {
 	ToggleFilter: bind([]string{"ctrl+o"}, "ctrl+o", "show/hide filtered console lines"),
 	ToggleCamera: bind([]string{"ctrl+t"}, "ctrl+t", "swap the console pane with the camera"),
 	CameraDetail: bind([]string{"b"}, "b", "camera picture: sharp, 640, 480, quadrant blocks, half blocks"),
+	CameraNext:   bind([]string{"n"}, "n", "next camera (the printer's enabled webcams, in its order)"),
 	Macros:       bind([]string{"f3", "g"}, "F3/g", "macros: all of them, filter, run, pin"),
 	Jobs:         bind([]string{"f7", "J"}, "F7/J", "jobs: files, print history, totals, job queue"),
 	Machine:      bind([]string{"f8", "M"}, "F8/M", "machine: host, MCUs, services, power devices"),
@@ -261,6 +262,10 @@ func whileCamera(m *model) (bool, string) {
 	return m.showVideo, "while the camera is showing"
 }
 
+func whileCameras(m *model) (bool, string) {
+	return m.showVideo && len(m.camList) > 1, "when the printer has more than one camera"
+}
+
 // registry is the ordered list help and footer render from.
 var registry = []keyEntry{
 	{b: keys.Help, scope: scopeGlobal, footer: true},
@@ -280,6 +285,7 @@ var registry = []keyEntry{
 	{b: keys.ToggleFilter, scope: scopeGlobal},
 	{b: keys.ToggleCamera, scope: scopeConsole, short: "camera", footer: true},
 	{b: keys.CameraDetail, scope: scopeConsole, short: "quality", footer: true, when: whileCamera},
+	{b: keys.CameraNext, scope: scopeConsole, short: "next camera", footer: true, when: whileCameras},
 	{b: keys.Quit, scope: scopeGlobal},
 
 	{b: keys.Pause, scope: scopeJob, short: "pause", when: whilePrinting, footer: true},
@@ -423,7 +429,7 @@ func footerHints(m *model) (pane, job []string) {
 		}
 		switch e.scope {
 		case ps:
-			if m.showVideo && m.focus == focusConsole && e.b != keys.ToggleCamera && e.b != keys.CameraDetail {
+			if m.showVideo && m.focus == focusConsole && e.b != keys.ToggleCamera && e.b != keys.CameraDetail && e.b != keys.CameraNext {
 				continue
 			}
 			p = append(p, h.Key+" "+label)

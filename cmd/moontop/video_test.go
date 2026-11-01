@@ -7,10 +7,12 @@ import (
 	"image/png"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/justinh-rahb/moontop/internal/moonraker/moonrakertest"
 	"github.com/justinh-rahb/moontop/internal/webcam"
 )
 
@@ -114,5 +116,43 @@ func TestCameraDetailCycle(t *testing.T) {
 	plain.cycleCameraDetail()
 	if plain.camDetail != camDetailQuad || plain.streamWidth() != 960 {
 		t.Fatalf("block terminal landed on %d width %d", plain.camDetail, plain.streamWidth())
+	}
+}
+
+// The pane follows the printer's [webcam] sections: disabled ones are
+// skipped, the first enabled is shown, n moves to the next, and each
+// camera's rotation, flips and target_fps come along.
+func TestCameraFollowsMoonrakerConfig(t *testing.T) {
+	srv := fakePrinter(t)
+	srv.Handle("server.webcams.list", moonrakertest.Result(map[string]any{"webcams": []any{
+		map[string]any{"name": "off", "uid": "u0", "enabled": false, "service": "mjpegstreamer", "stream_url": "/a/?action=stream", "snapshot_url": "/a/?action=snapshot"},
+		map[string]any{"name": "nozzle", "uid": "u1", "enabled": true, "service": "mjpegstreamer-adaptive", "stream_url": "/webcam/?action=stream",
+			"snapshot_url": "/webcam/?action=snapshot", "target_fps": 4, "flip_horizontal": true, "rotation": 90},
+		map[string]any{"name": "case", "uid": "u2", "enabled": true, "service": "webrtc-camerastreamer", "stream_url": "/webcam2/webrtc", "snapshot_url": "/webcam2/snapshot.jpg"},
+		map[string]any{"name": "player", "uid": "u3", "enabled": true, "service": "iframe", "stream_url": "/webcam/player"},
+	}}))
+	m := readyModel(t, srv)
+	m.setFocus(focusConsole)
+	m, cmd := updateCmd(t, m, tea.KeyMsg{Type: tea.KeyCtrlT})
+	m = update(t, m, collect(cmd)...)
+	if len(m.camList) != 2 || m.camName != "nozzle" {
+		t.Fatalf("cameras %+v, showing %q", m.camList, m.camName)
+	}
+	if m.camStream != "" || !strings.HasSuffix(m.camURL, "/webcam/?action=snapshot") {
+		t.Fatalf("adaptive mjpeg should poll the snapshot: stream %q url %q", m.camStream, m.camURL)
+	}
+	if !m.camCfg.FlipH || m.camCfg.Rotation != 90 || m.cameraInterval() != 250*time.Millisecond {
+		t.Fatalf("config not carried: %+v interval %v", m.camCfg, m.cameraInterval())
+	}
+	if v := m.View(); !strings.Contains(v, "5 nozzle") || !strings.Contains(v, "1/2 n next") {
+		t.Fatalf("title:\n%s", v)
+	}
+	m, _ = updateCmd(t, m, keyRunes("n"))
+	if m.camName != "case" || !strings.HasSuffix(m.camStream, "/webcam2/stream.h264") {
+		t.Fatalf("n: %q stream %q", m.camName, m.camStream)
+	}
+	m, _ = updateCmd(t, m, keyRunes("n"))
+	if m.camName != "nozzle" {
+		t.Fatalf("n wraps: %q", m.camName)
 	}
 }

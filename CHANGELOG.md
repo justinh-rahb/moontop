@@ -25,7 +25,11 @@ Releases are cut from this file: adding a `## [x.y.z] - YYYY-MM-DD` heading on
   sharp 960, sharp 640, sharp 480, quadrant blocks, and half blocks. The
   640 and 480 rungs decode a smaller picture, and the block rungs stay on
   the 480 decode. If the stream is unavailable, the pane falls back to the
-  JPEG snapshot. See [docs/CAMERA.md](docs/CAMERA.md).
+  JPEG snapshot. The pane follows the printer's `[webcam]` config: enabled
+  cameras in Moonraker's order (`n` for the next), each service played the
+  way it's meant to be, and `rotation`, `flip_horizontal`, `flip_vertical` and
+  `target_fps` applied. See [docs/CAMERA.md](docs/CAMERA.md). Contributed by
+  djsplice.
 
 ### Changed
 

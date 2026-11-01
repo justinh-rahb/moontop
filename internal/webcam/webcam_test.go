@@ -9,14 +9,85 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-func TestPickPrefersWebRTC(t *testing.T) {
+// The printer's order decides, as in Mainsail and Fluidd: the first
+// enabled camera is shown first, whatever its service.
+func TestPickFollowsMoonrakerOrder(t *testing.T) {
 	cams := []Cam{
 		{Name: "SpaghettiSpy", Service: "mjpegstreamer", StreamURL: "/webcam/?action=stream", SnapshotURL: "/webcam/?action=snapshot", Enabled: true},
 		{Name: "case", Service: "webrtc-camerastreamer", StreamURL: "/webcam/webrtc", SnapshotURL: "/webcam/snapshot.jpg", Enabled: true},
 	}
 	got, ok := Pick(cams)
-	if !ok || got.Name != "case" {
+	if !ok || got.Name != "SpaghettiSpy" {
 		t.Fatalf("pick = %+v ok=%v", got, ok)
+	}
+	if u := Usable(append([]Cam{{Name: "off", Service: "mjpegstreamer", SnapshotURL: "/x", Enabled: false}}, cams...)); len(u) != 2 || u[1].Name != "case" {
+		t.Fatalf("usable = %+v", u)
+	}
+}
+
+func TestSourcesForServices(t *testing.T) {
+	cases := []struct {
+		svc, stream, snap string
+		want              Sources
+	}{
+		{"mjpegstreamer", "/webcam/?action=stream", "/webcam/?action=snapshot", Sources{"/webcam/?action=stream", "/webcam/?action=snapshot"}},
+		{"uv4l-mjpeg", "/stream", "/snap.jpg", Sources{"/stream", "/snap.jpg"}},
+		{"mjpegstreamer-adaptive", "/webcam/?action=stream", "/webcam/?action=snapshot", Sources{"", "/webcam/?action=snapshot"}},
+		{"webrtc-camerastreamer", "/webcam/webrtc", "/webcam/snapshot.jpg", Sources{"/webcam/stream.h264", "/webcam/snapshot.jpg"}},
+		{"hlsstream", "http://cam/live.m3u8", "", Sources{"http://cam/live.m3u8", ""}},
+		{"ipstream", "rtsp://cam/stream1", "http://cam/snap.jpg", Sources{"rtsp://cam/stream1", "http://cam/snap.jpg"}},
+		{"webrtc-go2rtc", "http://host:1984/webrtc.html?src=cam", "http://host:1984/api/frame.jpeg?src=cam", Sources{"", "http://host:1984/api/frame.jpeg?src=cam"}},
+		{"iframe", "/webcam/player", "", Sources{"", ""}},
+		{"", "/webcam/webrtc", "/webcam/snapshot.jpg", Sources{"/webcam/stream.h264", "/webcam/snapshot.jpg"}},
+	}
+	for _, c := range cases {
+		if got := SourcesFor(Cam{Service: c.svc, StreamURL: c.stream, SnapshotURL: c.snap}); got != c.want {
+			t.Errorf("%s: %+v, want %+v", c.svc, got, c.want)
+		}
+	}
+	if u := Usable([]Cam{{Name: "player", Service: "iframe", StreamURL: "/webcam/player", Enabled: true}}); len(u) != 0 {
+		t.Fatal("an iframe camera without a snapshot can't be shown")
+	}
+}
+
+func TestCamFPS(t *testing.T) {
+	if (Cam{}).FPS(12) != 12 || (Cam{TargetFPS: 5}).FPS(12) != 5 || (Cam{TargetFPS: 30}).FPS(10) != 10 {
+		t.Fatal("fps")
+	}
+}
+
+// A 2×1 picture, red then green, through each orientation.
+func TestOrient(t *testing.T) {
+	red, green := color.RGBA{R: 255, A: 255}, color.RGBA{G: 255, A: 255}
+	img := image.NewRGBA(image.Rect(0, 0, 2, 1))
+	img.Set(0, 0, red)
+	img.Set(1, 0, green)
+	at := func(i image.Image, x, y int) color.RGBA {
+		r, g, b, a := i.At(x, y).RGBA()
+		return color.RGBA{uint8(r >> 8), uint8(g >> 8), uint8(b >> 8), uint8(a >> 8)}
+	}
+	if Orient(img, Cam{}) != image.Image(img) {
+		t.Fatal("no orientation should return the frame untouched")
+	}
+	if o := Orient(img, Cam{FlipH: true}); at(o, 0, 0) != green {
+		t.Fatal("flip_horizontal")
+	}
+	o := Orient(img, Cam{Rotation: 90})
+	if b := o.Bounds(); b.Dx() != 1 || b.Dy() != 2 || at(o, 0, 0) != red || at(o, 0, 1) != green {
+		t.Fatalf("rotation 90: %v", o.Bounds())
+	}
+	o = Orient(img, Cam{Rotation: 270})
+	if at(o, 0, 0) != green || at(o, 0, 1) != red {
+		t.Fatal("rotation 270")
+	}
+	if o := Orient(img, Cam{Rotation: 180}); at(o, 0, 0) != green {
+		t.Fatal("rotation 180")
+	}
+	tall := image.NewRGBA(image.Rect(0, 0, 1, 2))
+	tall.Set(0, 0, red)
+	tall.Set(0, 1, green)
+	if o := Orient(tall, Cam{FlipV: true}); at(o, 0, 0) != green {
+		t.Fatal("flip_vertical")
 	}
 }
 

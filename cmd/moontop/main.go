@@ -38,6 +38,7 @@ import (
 	"github.com/justinh-rahb/moontop/internal/moonraker"
 	"github.com/justinh-rahb/moontop/internal/prompt"
 	"github.com/justinh-rahb/moontop/internal/spark"
+	"github.com/justinh-rahb/moontop/internal/webcam"
 )
 
 // ---------------------------------------------------------------------------
@@ -269,6 +270,9 @@ type model struct {
 	// text; building a Kitty frame is too much work to repeat on every redraw.
 	showVideo     bool
 	camName       string
+	camList       []webcam.Cam // the printer's usable cameras, in its order
+	camIndex      int
+	camCfg        webcam.Cam // the one showing: rotation, flips, target_fps
 	camURL        string
 	camStream     string
 	camImg        image.Image
@@ -1945,6 +1949,9 @@ func (m model) paneTitle(f focusArea) string {
 	t := fmt.Sprintf("%d %s", paneNumber(f), name)
 	if f == focusConsole && m.showVideo {
 		hint := "ctrl+t console"
+		if len(m.camList) > 1 {
+			hint = fmt.Sprintf("%d/%d n next · ", m.camIndex+1, len(m.camList)) + hint
+		}
 		if d := m.detailLabel(); d != "" {
 			hint = d + " · " + hint
 		}
