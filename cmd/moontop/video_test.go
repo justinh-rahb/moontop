@@ -86,22 +86,22 @@ func TestCameraDetailCycle(t *testing.T) {
 	m := model{showVideo: true, camSharp: true, camImg: img}
 	m.pngEncode().Store(true)
 	m.paintCamera()
-	if !strings.Contains(m.camPaint, "\x1b_Ga=T") {
+	if !strings.Contains(m.camKitty, "\x1b_Ga=T") {
 		t.Fatal("auto should be the sharp picture")
 	}
 	if m.streamWidth() != 960 || m.detailLabel() != "" {
 		t.Fatalf("auto width %d label %q", m.streamWidth(), m.detailLabel())
 	}
 	m.cycleCameraDetail()
-	if m.camDetail != camDetail640 || m.streamWidth() != 640 || m.detailLabel() != "640" || !m.camEncode.Load() || !strings.Contains(m.camPaint, "\x1b_Ga=T") {
+	if m.camDetail != camDetail640 || m.streamWidth() != 640 || m.detailLabel() != "640" || !m.camEncode.Load() || !strings.Contains(m.camKitty, "\x1b_Ga=T") {
 		t.Fatalf("640 detail=%d encode=%v label=%q", m.camDetail, m.camEncode.Load(), m.detailLabel())
 	}
 	m.cycleCameraDetail()
-	if m.camDetail != camDetail480 || m.streamWidth() != 480 || m.detailLabel() != "480" || !m.camEncode.Load() || !strings.Contains(m.camPaint, "\x1b_Ga=T") {
+	if m.camDetail != camDetail480 || m.streamWidth() != 480 || m.detailLabel() != "480" || !m.camEncode.Load() || !strings.Contains(m.camKitty, "\x1b_Ga=T") {
 		t.Fatalf("480 detail=%d encode=%v label=%q", m.camDetail, m.camEncode.Load(), m.detailLabel())
 	}
 	m.cycleCameraDetail()
-	if m.streamWidth() != 480 || m.camEncode.Load() || strings.Contains(m.camPaint, "\x1b_Ga=T") || !strings.Contains(m.camPaint, "▘") {
+	if m.streamWidth() != 480 || m.camEncode.Load() || strings.Contains(m.camKitty, "\x1b_Ga=T") || !strings.Contains(m.camPaint, "▘") {
 		t.Fatalf("quad encode=%v paint=%q", m.camEncode.Load(), m.camPaint)
 	}
 	m.cycleCameraDetail()
@@ -109,7 +109,7 @@ func TestCameraDetailCycle(t *testing.T) {
 		t.Fatalf("half paint=%q", m.camPaint)
 	}
 	m.cycleCameraDetail()
-	if m.camDetail != camDetailAuto || m.streamWidth() != 960 || !m.camEncode.Load() || !strings.Contains(m.camPaint, "\x1b_Ga=T") {
+	if m.camDetail != camDetailAuto || m.streamWidth() != 960 || !m.camEncode.Load() || !strings.Contains(m.camKitty, "\x1b_Ga=T") {
 		t.Fatal("cycle did not return to sharp")
 	}
 
@@ -171,5 +171,80 @@ func TestCameraWebPageSnapshot(t *testing.T) {
 	}
 	if !strings.Contains(m.camErr, "Screen's snapshot URL is a web page") || !strings.Contains(m.camErr, "n: next camera") {
 		t.Fatalf("message: %q", m.camErr)
+	}
+}
+
+// Each new frame goes to the other of two image slots and deletes the
+// previous one, from the title line, so the picture never disappears
+// between frames (Justin's flicker in Ghostty) and the body lines, which
+// are rewritten whenever the panes beside them change, never resend it.
+func TestCameraFramesAlternateSlotsFromTheTitle(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 4, 4))
+	m := readyModel(t, fakePrinter(t))
+	m = update(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.showVideo, m.camSharp, m.camImg = true, true, img
+	m.setFocus(focusConsole)
+	m.pngEncode().Store(true)
+	m.paintCamera()
+	first := m.camKitty
+	if !strings.Contains(first, "i=8,") || !strings.Contains(first, "a=d,d=i,i=7") {
+		t.Fatalf("first frame: %q", first[:min(80, len(first))])
+	}
+	if !strings.HasPrefix(first, "\x1b7\x1b[1B") || !strings.HasSuffix(first, "\x1b8") {
+		t.Fatal("placement should be one row below the title, cursor restored")
+	}
+	if strings.Contains(m.camPaint, "\x1b_G") {
+		t.Fatal("body lines carry the frame")
+	}
+	m.camPNG = nil
+	m.paintCamera()
+	if !strings.Contains(m.camKitty, "i=7,") || !strings.Contains(m.camKitty, "a=d,d=i,i=8") {
+		t.Fatal("second frame should use the other slot and delete the first")
+	}
+	v := m.View()
+	if strings.Count(v, "\x1b_Ga=T") != 1 {
+		t.Fatalf("frame sent %d times in one view", strings.Count(v, "\x1b_Ga=T"))
+	}
+	lines := strings.Split(v, "\n")
+	for i, l := range lines {
+		if strings.Contains(l, "\x1b_Ga=T") {
+			if !strings.Contains(l, "5 ") {
+				t.Fatalf("placement isn't on the camera title's line: %q", l)
+			}
+			if i+1 >= len(lines) || !strings.Contains(lines[i+1], "▀") {
+				t.Fatal("the line below the title should be the picture")
+			}
+		}
+	}
+	// Leaving for another screen deletes both slots.
+	m.showHelp = true
+	pre := m.cameraDeletePrefix()
+	if !strings.Contains(pre, "i=7") || !strings.Contains(pre, "i=8") {
+		t.Fatalf("delete = %q", pre)
+	}
+}
+
+// The cursor save / move / restore around the placement is zero-width:
+// the title's line is as wide as the rest of the screen.
+func TestCameraPlacementKeepsLineWidths(t *testing.T) {
+	m := readyModel(t, fakePrinter(t))
+	m = update(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
+	m.showVideo, m.camSharp, m.camImg = true, true, image.NewRGBA(image.Rect(0, 0, 4, 4))
+	m.pngEncode().Store(true)
+	m.paintCamera()
+	lines := strings.Split(m.View(), "\n")
+	want := -1
+	for _, l := range lines {
+		if strings.Contains(l, "\x1b_G") {
+			want = lipgloss.Width(l)
+		}
+	}
+	if want < 0 {
+		t.Fatal("no placement in the view")
+	}
+	for i, l := range lines {
+		if strings.Contains(l, "▀") && lipgloss.Width(l) != want {
+			t.Fatalf("line %d is %d wide, the title line %d", i, lipgloss.Width(l), want)
+		}
 	}
 }

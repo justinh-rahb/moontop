@@ -289,6 +289,8 @@ type model struct {
 	camDetail     int // 0 sharp 960 or quadrants, 1 sharp 640, 2 sharp 480, 3 quadrants, 4 half blocks
 	camEncode     *atomic.Bool
 	camPlaced     bool
+	camKitty      string // the current frame's Kitty placement (title line)
+	camSlot       int    // which of the two image slots holds it
 	camStop       func()
 	camFrames     <-chan camFrameMsg
 	files         list.Model
@@ -1761,7 +1763,11 @@ func (m model) view() string {
 		},
 	}
 	pane := func(f focusArea) string {
-		return renderPanel(m.paneTitle(f), bodies[f](), m.focus == f, m.layout.w(f), m.layout.h(f))
+		title := m.paneTitle(f)
+		if f == focusConsole && m.showVideo {
+			title = m.cameraTitlePrefix() + title
+		}
+		return renderPanel(title, bodies[f](), m.focus == f, m.layout.w(f), m.layout.h(f))
 	}
 	// Top panes in the configured order (hidden ones are already left
 	// out of layout.order), console last unless hidden.

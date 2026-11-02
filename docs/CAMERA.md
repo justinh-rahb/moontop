@@ -54,7 +54,12 @@ Block rungs also stop the PNG encode. The flag lives on the heap: Bubble Tea cop
 
 ## How a frame is drawn
 
-A sharp frame is encoded as a PNG (`BestSpeed`) and placed with the Kitty graphics protocol. One image id is reused, so each frame replaces the last. The sequence transmits and displays (`a=T`), says the payload is a PNG (`f=100`), leaves the cursor where it is (`C=1`), and paints above the text (`z=1`). The base64 is split into 4096-character chunks with no newlines, so a panel splitter that cuts on newlines cannot divide a command.
+A sharp frame is encoded as a PNG (`BestSpeed`) and placed with the Kitty graphics protocol. The sequence transmits and displays (`a=T`), says the payload is a PNG (`f=100`), leaves the cursor where it is (`C=1`), and paints above the text (`z=1`). The base64 is split into 4096-character chunks with no newlines, so a panel splitter that cuts on newlines cannot divide a command.
+
+Two things keep the picture steady (it used to flicker between the photo and the half blocks underneath, in Ghostty):
+
+- **Two image slots.** Re-sending an image under the same id deletes the old one first, and a terminal may redraw before the new one has fully arrived. Frames alternate between ids 7 and 8: the new frame is placed in the free slot, then the other is deleted, so a picture is on screen throughout.
+- **Sent once, from the title line.** Bubble Tea rewrites a whole screen line when anything on it changes, and the camera body shares its lines with the panes beside it, which change several times a second. A placement in the body would be re-sent (and replaced) with every one of those changes. So the placement is written on the pane's title line, which only changes when a new frame arrives, wrapped in save cursor / down one row / restore cursor so it lands on the body's first cell.
 
 Unicode placeholders are not used. U+10EEEE is two columns wide in the width tables this layout uses, and a placeholder grid wraps the pane.
 

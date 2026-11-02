@@ -11,6 +11,10 @@ Releases are cut from this file: adding a `## [x.y.z] - YYYY-MM-DD` heading on
 
 ### Fixed
 
+- The sharp camera picture no longer flickers between the photo and the
+  block picture underneath (seen in Ghostty): frames alternate between two
+  image slots, and each is sent once from the pane's title line instead of
+  again whenever a neighbouring pane changes.
 - An `iframe` camera (such as HelixScreen's screen mirror) whose snapshot URL
   is the page itself is no longer offered; a snapshot that turns out to be a
   web page is reported plainly instead of a JPEG decoding error. PNG and GIF

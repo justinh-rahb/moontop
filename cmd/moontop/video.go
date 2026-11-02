@@ -473,15 +473,35 @@ func (m *model) paintCamera() {
 				m.camPNG = pngBytes
 			}
 		}
-		if seq := webcam.PlaceKitty(pngBytes, cols, rows); seq != "" {
-			// Half-blocks stay underneath. Terminals that honour the
-			// placement draw the photo over them; the rest show the blocks.
-			m.camPaint = seq + webcam.Draw(m.camImg, cols, rows)
+		// The frame goes out once, from the pane title's line (see
+		// cameraTitlePrefix), in the slot not on screen. Half blocks
+		// stay underneath: terminals that honour the placement draw the
+		// photo over them; the rest show the blocks.
+		m.camSlot = 1 - m.camSlot
+		if seq := webcam.PlaceKittyFrame(pngBytes, cols, rows, m.camSlot, 1); seq != "" {
+			m.camKitty = seq
+			m.camPaint = webcam.Draw(m.camImg, cols, rows)
 			m.camPlaced = true
 			return
 		}
 	}
+	m.camKitty = ""
 	m.camPaint = m.drawBlocks(m.camImg, cols, rows)
+}
+
+// cameraTitlePrefix is the current frame's placement, written ahead of
+// the camera pane's title. The title line only changes when a new frame
+// arrives, so the frame is sent once; the body lines, which share their
+// screen rows with the panes beside them and are rewritten whenever
+// those change, carry only the half blocks.
+func (m model) cameraTitlePrefix() string {
+	if m.camKitty == "" || !m.cameraOnScreen() {
+		return ""
+	}
+	if cols, rows := m.cameraCells(); cols != m.camPaintCols || rows != m.camPaintRows {
+		return ""
+	}
+	return m.camKitty
 }
 
 func (m model) cameraCells() (cols, rows int) {
@@ -503,10 +523,8 @@ func (m model) renderCamera() string {
 		if m.camPaint != "" && m.camPaintCols == cols && m.camPaintRows == rows {
 			return m.camPaint
 		}
-		if m.placingSharp() && len(m.camPNG) > 0 {
-			if seq := webcam.PlaceKitty(m.camPNG, cols, rows); seq != "" {
-				return seq + webcam.Draw(m.camImg, cols, rows)
-			}
+		if m.placingSharp() {
+			return webcam.Draw(m.camImg, cols, rows)
 		}
 		return m.drawBlocks(m.camImg, cols, rows)
 	}

@@ -10,8 +10,12 @@ import (
 	"time"
 )
 
-// kittyImageID is the one image slot the camera pane reuses. Sending
-// it again replaces the previous frame.
+// kittyImageID and kittyImageID+1 are the two image slots the camera
+// pane alternates between. Re-sending an image under the same id deletes
+// the old one first, and a terminal that redraws before the new one has
+// fully arrived (Ghostty does, between chunks) shows the half blocks
+// underneath for a moment: a flicker on every frame. With two slots, the
+// new frame is placed in the free slot, then the old slot is deleted.
 const kittyImageID = 7
 
 // GraphicsEnabled reports whether this terminal can show a Kitty image.
@@ -75,10 +79,33 @@ func PlaceKitty(png []byte, cols, rows int) string {
 	return kittyTransmit(png, kittyImageID, cols, rows)
 }
 
-// DeleteKitty removes the camera image so a placement cannot sit on
+// PlaceKittyFrame places one camera frame in slot (0 or 1) and then
+// deletes the other slot's image, so a picture is on screen throughout.
+// down > 0 places it that many rows below the cursor (saving and
+// restoring the cursor), so the sequence can live on a line that's
+// rarely rewritten (the pane's title) while the picture covers the body:
+// a line rewritten for any other reason would send the frame again.
+func PlaceKittyFrame(png []byte, cols, rows, slot, down int) string {
+	if len(png) == 0 || cols < 1 || rows < 1 {
+		return ""
+	}
+	id := kittyImageID + slot%2
+	other := kittyImageID + 1 - slot%2
+	seq := kittyTransmit(png, id, cols, rows) + deleteImage(other)
+	if down > 0 {
+		seq = fmt.Sprintf("\x1b7\x1b[%dB", down) + seq + "\x1b8"
+	}
+	return seq
+}
+
+// DeleteKitty removes the camera images so a placement cannot sit on
 // top of the console after the pane is swapped back.
 func DeleteKitty() string {
-	return fmt.Sprintf("\x1b_Ga=d,d=i,i=%d,q=2\x1b\\", kittyImageID)
+	return deleteImage(kittyImageID) + deleteImage(kittyImageID+1)
+}
+
+func deleteImage(id int) string {
+	return fmt.Sprintf("\x1b_Ga=d,d=i,i=%d,q=2\x1b\\", id)
 }
 
 // kittyTransmit sends PNG bytes (f=100) and displays them. z=1 keeps
