@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"image/png"
@@ -282,6 +283,15 @@ func (m *model) onCamFrame(msg camFrameMsg) tea.Cmd {
 		return waitCamFrame(m.camFrames, m.camGen)
 	}
 	if m.camLive {
+		return nil
+	}
+	if errors.Is(msg.err, webcam.ErrNotImage) {
+		// A page, not a picture (an iframe camera's player): polling
+		// again won't change that.
+		m.camErr = m.camName + "'s snapshot URL is a web page, not a picture; a terminal can't show it"
+		if len(m.camList) > 1 {
+			m.camErr += " (n: next camera)"
+		}
 		return nil
 	}
 	if msg.err != nil {

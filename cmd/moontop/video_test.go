@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -154,5 +155,21 @@ func TestCameraFollowsMoonrakerConfig(t *testing.T) {
 	m, _ = updateCmd(t, m, keyRunes("n"))
 	if m.camName != "nozzle" {
 		t.Fatalf("n wraps: %q", m.camName)
+	}
+}
+
+// A snapshot URL that serves a page says so, once, instead of a JPEG
+// decoder error on every poll.
+func TestCameraWebPageSnapshot(t *testing.T) {
+	m := readyModel(t, fakePrinter(t))
+	m.showVideo = true
+	m.camName = "Screen"
+	m.camList = []webcam.Cam{{Name: "Screen"}, {Name: "nozzle"}}
+	m, cmd := updateCmd(t, m, camFrameMsg{gen: m.camGen, err: fmt.Errorf("x is a web page, %w", webcam.ErrNotImage)})
+	if cmd != nil {
+		t.Fatal("kept polling a page")
+	}
+	if !strings.Contains(m.camErr, "Screen's snapshot URL is a web page") || !strings.Contains(m.camErr, "n: next camera") {
+		t.Fatalf("message: %q", m.camErr)
 	}
 }

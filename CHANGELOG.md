@@ -11,6 +11,10 @@ Releases are cut from this file: adding a `## [x.y.z] - YYYY-MM-DD` heading on
 
 ### Fixed
 
+- An `iframe` camera (such as HelixScreen's screen mirror) whose snapshot URL
+  is the page itself is no longer offered; a snapshot that turns out to be a
+  web page is reported plainly instead of a JPEG decoding error. PNG and GIF
+  snapshots now work.
 - A redirect from the printer to another host (or port) no longer carries
   your Moonraker API key or login token with it.
 

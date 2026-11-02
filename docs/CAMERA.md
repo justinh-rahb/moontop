@@ -17,7 +17,7 @@ The cameras are the printer's `[webcam]` sections, from `server.webcams.list`, a
   | `hlsstream`, `ipstream` | the `stream_url` (HLS, HTTP or RTSP), live through ffmpeg |
   | `webrtc-go2rtc`, `webrtc-mediamtx`, `webrtc-janus`, `jmuxer-stream`, `iframe` | the `snapshot_url` only — there's no terminal decoder for these |
 
-  A camera with neither a playable stream nor a snapshot isn't offered.
+  A camera with neither a playable stream nor a snapshot isn't offered. An `iframe` camera is a web page (HelixScreen's screen mirror, a player page), which a terminal can't render: it's offered only if its `snapshot_url` is a separate image, not the page itself. A snapshot URL that answers with a web page is reported once, not polled.
 - **`rotation`, `flip_horizontal`, `flip_vertical`** are applied to every frame, snapshot or live, before it's drawn.
 - **`target_fps`** sets the live decode rate (at most 12) and the snapshot poll rate (at most 10 a second); unset means Moonraker's default, 15.
 - **URLs.** An absolute URL is used as given. A relative one is resolved against the printer: on a plain-`http` Moonraker at port 7125 it goes to the same host's port 80 (the web front end's `/webcam/` proxy), otherwise to Moonraker's own scheme, host and port.

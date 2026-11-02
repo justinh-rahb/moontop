@@ -1,8 +1,14 @@
 package webcam
 
 import (
+	"context"
+	"errors"
 	"image"
 	"image/color"
+	"image/png"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -155,5 +161,49 @@ func TestDrawQuad(t *testing.T) {
 	}
 	if strings.ContainsAny(DrawQuad(flat, 1, 1), "▘▝▀▖▌▞▛▗▚▐▜▄▙▟█") {
 		t.Fatal("flat cell used a quadrant glyph")
+	}
+}
+
+// HelixScreen's touchscreen mirror is an iframe "camera" whose snapshot
+// URL is the same player page: nothing a terminal can show.
+func TestIframeSnapshotThatIsThePage(t *testing.T) {
+	c := Cam{Name: "Screen", Service: "iframe", StreamURL: "/helixscreen/screen", SnapshotURL: "/helixscreen/screen/", Enabled: true}
+	if s := SourcesFor(c); s != (Sources{}) {
+		t.Fatalf("sources = %+v", s)
+	}
+	if len(Usable([]Cam{c})) != 0 {
+		t.Fatal("offered a camera with nothing to show")
+	}
+	c.SnapshotURL = "/helixscreen/screenshot.jpg"
+	if s := SourcesFor(c); s.Snapshot != "/helixscreen/screenshot.jpg" {
+		t.Fatalf("a real snapshot should be kept: %+v", s)
+	}
+}
+
+func TestFetchRejectsWebPagesAcceptsPNG(t *testing.T) {
+	page := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		io.WriteString(w, "<html>player</html>")
+	}))
+	defer page.Close()
+	if _, err := Fetch(context.Background(), page.URL); !errors.Is(err, ErrNotImage) {
+		t.Fatalf("html: %v", err)
+	}
+	garbage := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		io.WriteString(w, "not a picture")
+	}))
+	defer garbage.Close()
+	if _, err := Fetch(context.Background(), garbage.URL); !errors.Is(err, ErrNotImage) {
+		t.Fatalf("garbage: %v", err)
+	}
+	pngSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_ = png.Encode(w, image.NewRGBA(image.Rect(0, 0, 3, 2)))
+	}))
+	defer pngSrv.Close()
+	img, err := Fetch(context.Background(), pngSrv.URL)
+	if err != nil || img.Bounds().Dx() != 3 {
+		t.Fatalf("png: %v %v", img, err)
 	}
 }

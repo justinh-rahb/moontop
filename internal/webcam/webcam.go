@@ -6,11 +6,14 @@ package webcam
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
-	"image/jpeg"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"net"
 	"net/http"
@@ -66,10 +69,25 @@ func SourcesFor(c Cam) Sources {
 	case "hlsstream", "ipstream":
 		return Sources{Stream: stream, Snapshot: snap}
 	case "webrtc-go2rtc", "webrtc-mediamtx", "webrtc-janus", "jmuxer-stream", "iframe":
+		// A player page isn't its own snapshot: an iframe camera often
+		// has the page as both URLs (HelixScreen's /screen does).
+		if samePath(snap, stream) {
+			snap = ""
+		}
 		return Sources{Snapshot: snap}
 	}
 	return Sources{Stream: H264Path(stream, snap), Snapshot: snap}
 }
+
+// samePath reports whether two configured URLs name the same page,
+// ignoring a trailing slash.
+func samePath(a, b string) bool {
+	return a != "" && strings.TrimRight(a, "/") == strings.TrimRight(b, "/")
+}
+
+// ErrNotImage is a snapshot URL that answers with something other than
+// a picture — usually a web page.
+var ErrNotImage = errors.New("not an image")
 
 // Usable is the cameras the pane can show, in Moonraker's order (the
 // order of the [webcam] sections, which Mainsail and Fluidd keep too):
@@ -200,9 +218,14 @@ func Fetch(ctx context.Context, url string) (image.Image, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%s: %s", url, resp.Status)
 	}
-	img, err := jpeg.Decode(io.LimitReader(resp.Body, 12<<20))
+	ct := strings.ToLower(resp.Header.Get("Content-Type"))
+	if strings.HasPrefix(ct, "text/") || strings.Contains(ct, "html") {
+		return nil, fmt.Errorf("%s is a web page, %w", url, ErrNotImage)
+	}
+	// JPEG mostly; PNG and GIF from some snapshot endpoints.
+	img, _, err := image.Decode(io.LimitReader(resp.Body, 12<<20))
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", url, err)
+		return nil, fmt.Errorf("%s: %w (%v)", url, ErrNotImage, err)
 	}
 	return img, nil
 }
