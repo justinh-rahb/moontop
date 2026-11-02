@@ -97,3 +97,38 @@ func TestTintView(t *testing.T) {
 		t.Fatalf("lines / end: %q", got)
 	}
 }
+
+// Setup remembers the cursor in each category, and the first visit to
+// Display lands on the scheme in use, so changing it again is a short
+// step rather than a walk down the whole list.
+func TestSetupRemembersCursor(t *testing.T) {
+	t.Cleanup(func() { applyTheme("") })
+	applyTheme("amber")
+	m := setupModel(t, fakePrinter(t))
+	m = openCategory(t, m, "Display")
+	if got := themes[m.setup.item].name; got != "amber" {
+		t.Fatalf("first visit cursor on %q, want amber", got)
+	}
+	m = press(t, m, "down", "down")
+	want := m.setup.item
+
+	// Out to the categories, over to another one and back.
+	m = press(t, m, "esc", "up", "down", "tab")
+	if m.setup.item != want {
+		t.Fatalf("after switching categories cursor = %d, want %d", m.setup.item, want)
+	}
+	// Close setup and open it again.
+	m = press(t, m, "esc", "esc", "f2")
+	if !m.setup.open {
+		t.Fatal("setup didn't reopen")
+	}
+	m = press(t, m, "enter")
+	if m.setup.item != want {
+		t.Fatalf("after reopening cursor = %d, want %d", m.setup.item, want)
+	}
+	// Another category starts at its top the first time.
+	m = press(t, m, "esc", "up", "tab")
+	if m.setup.item != 0 {
+		t.Fatalf("unvisited category cursor = %d", m.setup.item)
+	}
+}

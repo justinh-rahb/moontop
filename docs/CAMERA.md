@@ -38,7 +38,7 @@ Changing width kills ffmpeg and starts another. A generation counter makes the o
 
 ## Quality ladder
 
-`b` cycles the picture while the camera is showing. On the console, `b` is just a letter.
+`b` cycles the picture while the camera is showing, and the choice is saved to `config.toml` (`[display] camera`) for next time. On the console, `b` is just a letter.
 
 | Rung | What you see | Decode width |
 | --- | --- | --- |

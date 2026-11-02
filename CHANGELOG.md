@@ -9,6 +9,14 @@ Releases are cut from this file: adding a `## [x.y.z] - YYYY-MM-DD` heading on
 
 ## [Unreleased]
 
+### Changed
+
+- Setup remembers where you were in each category, so going back to a list,
+  or opening setup again, puts the cursor on the item you last used. The
+  first visit to Display lands on the scheme in use. (Suggested by Justin.)
+- The camera remembers the picture style picked with `b` (`[display] camera`
+  in `config.toml`). (Suggested by Justin.)
+
 ### Fixed
 
 - The sharp camera picture no longer flickers between the photo and the

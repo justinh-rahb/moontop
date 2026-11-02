@@ -30,6 +30,10 @@ type setupState struct {
 	input    textinput.Model
 	status   string // last save result or error
 	pendingD bool   // "d" pressed once on a deletable item
+
+	// itemPos is where the cursor was in each category, so coming back
+	// (or reopening setup) lands on the last item used, not the first.
+	itemPos map[int]int
 }
 
 // setupEdit is an in-progress text edit (rename, pattern, number…).
@@ -177,6 +181,7 @@ func panesItems(m *model) []setupItem {
 				m.cfg.Panes.Move(name, delta)
 				m.setup.item += delta
 				m.clampSetup()
+				m.rememberItem()
 				return m.saveFile()
 			},
 		})
@@ -534,6 +539,33 @@ func (m *model) openSetup() {
 	}
 }
 
+// rememberItem notes the cursor for the current category.
+func (m *model) rememberItem() {
+	if m.setup.itemPos == nil {
+		m.setup.itemPos = map[int]int{}
+	}
+	m.setup.itemPos[m.setup.cat] = m.setup.item
+}
+
+// restoreItem puts the cursor back where it was in this category; the
+// first time in Display, on the scheme in use.
+func (m *model) restoreItem() {
+	st := &m.setup
+	if pos, ok := st.itemPos[st.cat]; ok {
+		st.item = pos
+	} else {
+		st.item = 0
+		if setupCategories[st.cat].name == "Display" {
+			for i, t := range themes {
+				if t.name == currentTheme {
+					st.item = i
+				}
+			}
+		}
+	}
+	m.clampSetup()
+}
+
 func (m *model) currentItems() []setupItem {
 	return setupCategories[m.setup.cat].items(m)
 }
@@ -589,7 +621,8 @@ func (m *model) handleSetupKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	case k == "tab", k == "right", k == "l":
 		if !st.inItems {
-			st.inItems, st.item = true, 0
+			st.inItems = true
+			m.restoreItem()
 		}
 		return nil
 	case k == "shift+tab", k == "left", k == "h":
@@ -599,18 +632,20 @@ func (m *model) handleSetupKey(msg tea.KeyMsg) tea.Cmd {
 		if st.inItems {
 			st.item--
 			m.clampSetup()
+			m.rememberItem()
 		} else if st.cat > 0 {
 			st.cat--
-			st.item = 0
+			m.restoreItem()
 		}
 		return nil
 	case k == "down", k == "j":
 		if st.inItems {
 			st.item++
 			m.clampSetup()
+			m.rememberItem()
 		} else if st.cat < len(setupCategories)-1 {
 			st.cat++
-			st.item = 0
+			m.restoreItem()
 		}
 		return nil
 	case k == "a" && cat.add != nil:
@@ -619,7 +654,8 @@ func (m *model) handleSetupKey(msg tea.KeyMsg) tea.Cmd {
 	}
 	if !st.inItems {
 		if k == "enter" {
-			st.inItems, st.item = true, 0
+			st.inItems = true
+			m.restoreItem()
 		}
 		return nil
 	}

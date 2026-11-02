@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/justinh-rahb/moontop/internal/config"
 	"github.com/justinh-rahb/moontop/internal/moonraker/moonrakertest"
 	"github.com/justinh-rahb/moontop/internal/webcam"
 )
@@ -111,6 +112,10 @@ func TestCameraDetailCycle(t *testing.T) {
 	m.cycleCameraDetail()
 	if m.camDetail != camDetailAuto || m.streamWidth() != 960 || !m.camEncode.Load() || !strings.Contains(m.camKitty, "\x1b_Ga=T") {
 		t.Fatal("cycle did not return to sharp")
+	}
+
+	if m.cfg.Display.Camera != "" {
+		t.Fatalf("auto saved as %q", m.cfg.Display.Camera)
 	}
 
 	plain := model{showVideo: true, camImg: img}
@@ -245,6 +250,47 @@ func TestCameraPlacementKeepsLineWidths(t *testing.T) {
 	for i, l := range lines {
 		if strings.Contains(l, "▀") && lipgloss.Width(l) != want {
 			t.Fatalf("line %d is %d wide, the title line %d", i, lipgloss.Width(l), want)
+		}
+	}
+}
+
+// The picture style picked with b is saved to the config file and comes
+// back the next time the camera opens. The Kitty-only sizes fall back to
+// auto on a terminal that can't draw them.
+func TestCameraDetailRemembered(t *testing.T) {
+	m := setupModel(t, fakePrinter(t))
+	m.camSharp = true
+	m.camDetail = camDetailAuto
+	if msg := m.cycleCameraDetail()(); msg != nil {
+		if b, ok := msg.(tea.BatchMsg); ok {
+			for _, c := range b {
+				c()
+			}
+		}
+	}
+	if m.cfg.Display.Camera != "640" {
+		t.Fatalf("cfg camera = %q", m.cfg.Display.Camera)
+	}
+	c, err := config.Load(m.cfgPath)
+	if err != nil || c.Display.Camera != "640" {
+		t.Fatalf("reload = %q, %v", c.Display.Camera, err)
+	}
+	for _, tc := range []struct {
+		label string
+		sharp bool
+		want  int
+	}{
+		{"", true, camDetailAuto},
+		{"640", true, camDetail640},
+		{"480", true, camDetail480},
+		{"640", false, camDetailAuto},
+		{"480", false, camDetailAuto},
+		{"quad", false, camDetailQuad},
+		{"half", true, camDetailHalf},
+		{"bogus", true, camDetailAuto},
+	} {
+		if got := savedDetail(tc.label, tc.sharp); got != tc.want {
+			t.Errorf("savedDetail(%q, %v) = %d, want %d", tc.label, tc.sharp, got, tc.want)
 		}
 	}
 }

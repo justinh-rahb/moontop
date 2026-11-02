@@ -59,6 +59,7 @@ func (m *model) toggleCamera() tea.Cmd {
 
 func (m *model) openCamera() tea.Cmd {
 	m.camSharp = webcam.SharpGraphics()
+	m.camDetail = savedDetail(m.cfg.Display.Camera, m.camSharp)
 	m.pngEncode().Store(m.placingSharp())
 	m.camErr = ""
 	if webcam.GraphicsEnabled() && !m.camSharp {
@@ -369,10 +370,38 @@ func (m *model) cycleCameraDetail() tea.Cmd {
 	m.camDetail = m.nextDetail()
 	m.pngEncode().Store(m.placingSharp())
 	m.paintCamera()
+	var cmds []tea.Cmd
 	if m.showVideo && m.camStream != "" && m.streamWidth() != prev {
-		return m.startStream()
+		cmds = append(cmds, m.startStream())
 	}
-	return nil
+	// Remembered for next time. Without a usable config file there is
+	// nowhere to keep it, and saying so on every b press is just noise.
+	m.cfg.Display.Camera = m.detailLabel()
+	if m.cfgPath != "" {
+		cmds = append(cmds, m.saveFile())
+	}
+	return tea.Batch(cmds...)
+}
+
+// savedDetail is the picture style from the config file. The 640 and
+// 480 rungs need Kitty graphics; on a terminal without them a saved
+// one falls back to auto, which is quadrant blocks there.
+func savedDetail(label string, sharp bool) int {
+	switch label {
+	case "640":
+		if sharp {
+			return camDetail640
+		}
+	case "480":
+		if sharp {
+			return camDetail480
+		}
+	case "quad":
+		return camDetailQuad
+	case "half":
+		return camDetailHalf
+	}
+	return camDetailAuto
 }
 
 func (m model) nextDetail() int {

@@ -299,7 +299,7 @@ Type gcode and press `Enter`. Klipper errors are red, echoes muted, and Moontop'
 - While you type a macro, the pane title shows the parameters you haven't given yet, with their defaults.
 - `↑` `↓` history. `Ctrl+O` shows the lines filters hide (heat-wait temperatures and TMC current reports, by default).
 - `F5` / `F6` restart Klipper from here, where `K` and `F` are just letters.
-- `Ctrl+T` swaps this pane with the printer's webcam — the cameras configured in Moonraker, in its order, with their rotation, flips and frame rate; `n` goes to the next one. The console log, and anything you had typed, stay put. `b` cycles the picture while the camera is showing: sharp 960, sharp 640, sharp 480, quadrant blocks, half blocks. The title shows `640`, `480`, `quad`, or `half`. Sharp pictures need `ffmpeg` on `PATH`. Ghostty, Kitty, and WezTerm draw the frame; other terminals draw quadrant blocks. Inside tmux, the sharp picture also needs `set -g allow-passthrough on`. [How the picture is drawn](docs/CAMERA.md).
+- `Ctrl+T` swaps this pane with the printer's webcam — the cameras configured in Moonraker, in its order, with their rotation, flips and frame rate; `n` goes to the next one. The console log, and anything you had typed, stay put. `b` cycles the picture while the camera is showing: sharp 960, sharp 640, sharp 480, quadrant blocks, half blocks. The title shows `640`, `480`, `quad`, or `half`, and the choice is saved for next time. Sharp pictures need `ffmpeg` on `PATH`. Ghostty, Kitty, and WezTerm draw the frame; other terminals draw quadrant blocks. Inside tmux, the sharp picture also needs `set -g allow-passthrough on`. [How the picture is drawn](docs/CAMERA.md).
 
 ### 6 · AFC
 
@@ -600,6 +600,7 @@ Moontop is meant to be hard to hurt a printer with.
 ```toml
 [display]
 theme = "phosphor"
+camera = "640"               # picture style last picked with b
 
 [panes]
 order = ["Temperatures", "Files", "Toolhead", "Tuning"]

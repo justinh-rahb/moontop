@@ -40,9 +40,12 @@ type Config struct {
 }
 
 // Display: how Moontop looks. Theme is a colour scheme name ("" = the
-// default); see the Display category in setup for the list.
+// default); see the Display category in setup for the list. Camera is
+// the picture style last picked with b in the camera pane: "640",
+// "480", "quad" or "half" ("" = auto).
 type Display struct {
-	Theme string `toml:"theme,omitempty"`
+	Theme  string `toml:"theme,omitempty"`
+	Camera string `toml:"camera,omitempty"`
 }
 
 // Panes: names as shown in pane titles ("Files", "Toolhead", "Tuning",
