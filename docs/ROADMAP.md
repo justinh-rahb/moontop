@@ -16,7 +16,7 @@ Moontop is a Moonraker client for the terminal: a dashboard, a set of full-scree
 | Releases | v0.1.0 and v0.2.0; builds for Linux, macOS, Windows and FreeBSD; changelog-driven releases ([RELEASING.md](RELEASING.md)); website on GitHub Pages |
 | Tests | Every feature against the fake Moonraker; race detector on Linux, macOS and Windows in CI |
 
-**Verified on hardware:** the dashboard, Toolhead, Temperatures, Files and the full-screen tools on Justin's Snapmaker U1 and Qidi Q2; AFC display and console output on jimmyjon711's AFC printer (Box Turtle, ViViD, EMU, OpenAMS, ACE); the camera on djsplice's printer in Ghostty.
+**Verified on hardware:** the dashboard, Toolhead, Temperatures, Files and the full-screen tools on Justin's Snapmaker U1 and Qidi Q2; AFC display and console output on jimmyjon711's AFC printer (Box Turtle, ViViD, EMU, OpenAMS, ACE); the camera on djsplice's printer and on Justin's (sharp picture, no flicker since a136fa4) in Ghostty.
 
 **Not yet verified on hardware:** AFC load / unload / eject, extrude / retract, filament load / unload macros, LED colour, power-device switching, upload & print, sign-in against a Moonraker with `force_logins`, and the camera's MJPEG, HLS and RTSP paths. Each is covered by fake-Moonraker tests; the [hardware checklist](#hardware-checklist) is how they get confirmed.
 
