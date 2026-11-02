@@ -66,16 +66,21 @@ cmd/moontop/            the program: dashboard model, panes, screens, CLI modes
   theme.go              shared colours and focus styles
   cmds.go               tea.Cmd wrappers around Moonraker calls
   <pane>.go             one file per pane or screen (toolhead, extruder, jobs, …)
-  cli.go, repl.go       `console`, `gcode`, `dump`, `version` subcommands
+  connect.go            connection manager, sign-in, host history
+  video.go              the camera in pane 5
+  cli.go, repl.go       `console`, `gcode`, `upload` / `print`, `dump`, `version`
   version.go            version info (set by -ldflags in releases)
 cmd/moonraker-test/     raw client harness: prints status updates from a real printer
 internal/moonraker/     websocket client, typed API calls, notification names
 internal/moonraker/moonrakertest/   fake Moonraker for tests
 internal/config/        config.toml and per-printer settings
 internal/console/       line classification, filters, history, backfill
+internal/webcam/        camera sources, ffmpeg decode, block and Kitty drawing
 internal/afc, macros, prompt, spark, moo   self-contained helpers with their own tests
-docs/                   ROADMAP.md (phase plan and status), UI-PLAN.md, RELEASING.md,
-                        and the GitHub Pages site (index.html, site.css, site.js, shots/)
+scripts/                release-notes.sh (release notes from CHANGELOG.md and git)
+docs/                   ROADMAP.md (status, what's next, hardware checklist),
+                        CAMERA.md, RELEASING.md, and the GitHub Pages site
+                        (index.html, site.css, site.js, shots/, install.sh)
 ```
 
 ## Rules the code follows
@@ -110,8 +115,9 @@ These have held since the first phase; keep them.
 - **Comes with tests** that fail without it: key handling, the gcode or
   RPC it sends, and what the view shows.
 - **Comes with docs** when it changes what a user sees or does: `README.md`
-  (keys, screens, install), `docs/ROADMAP.md` status, and a line in
-  `CHANGELOG.md` under `## [Unreleased]`.
+  (keys, screens, install) and a line in `CHANGELOG.md` under
+  `## [Unreleased]`, crediting whoever suggested or contributed it. Tick off
+  or update `docs/ROADMAP.md` when a roadmap item ships or the plan changes.
 - **Is gofmt'd, vetted and green** under `go test -race ./...`. Never commit
   with a failing test, not even "to fix next".
 - **Commit messages**: a short imperative or "Area: what changed" subject
@@ -119,6 +125,14 @@ These have held since the first phase; keep them.
   line, then a body saying why when it isn't obvious.
 - Don't bump versions or add `## [x.y.z]` headings in `CHANGELOG.md`: a
   versioned heading on `main` **publishes a release** (see `docs/RELEASING.md`).
+
+## Hardware
+
+There is no printer in CI, and the author doesn't own every printer Moontop
+runs on. Anything that moves, heats or switches something is tested against
+the fake Moonraker *and* listed in the hardware checklist in
+`docs/ROADMAP.md` until someone confirms it on a real machine. Say in the PR
+which printer you tried it on, if any.
 
 ## Gotchas
 

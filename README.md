@@ -676,7 +676,7 @@ internal/
   macros/                macro parameters from templates
   prompt/                action:prompt_* parser
   spark/                 braille sparklines
-docs/                    CAMERA.md, ROADMAP.md, UI-PLAN.md, RELEASING.md; the website (index.html, shots/)
+docs/                    ROADMAP.md (what's next), CAMERA.md, RELEASING.md; the website (index.html, shots/)
 testdata/                printer status fixtures (a U1's AFC-Lite)
 ```
 

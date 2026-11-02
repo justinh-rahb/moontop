@@ -4,7 +4,10 @@
 
 ## How it was tested
 
-<!-- Tests added or changed, and anything you checked by hand (printer, terminal, OS). -->
+<!-- Tests added or changed, and anything you checked by hand: which printer
+(and firmware / add-ons like AFC), terminal and OS. If it moves, heats or
+switches something and you couldn't try it on a printer, say so; it goes on
+the hardware checklist in docs/ROADMAP.md. -->
 
 ## Checklist
 

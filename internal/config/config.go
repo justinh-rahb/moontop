@@ -1,6 +1,6 @@
 // Package config holds Moontop's settings (UI-2).
 //
-// Two stores, decided in docs/UI-PLAN.md:
+// Two stores:
 //
 //   - File: ~/.config/moontop/config.toml ($XDG_CONFIG_HOME respected)
 //     holds display and behaviour preferences — panes, console
