@@ -9,6 +9,11 @@ Releases are cut from this file: adding a `## [x.y.z] - YYYY-MM-DD` heading on
 
 ## [Unreleased]
 
+### Fixed
+
+- A redirect from the printer to another host (or port) no longer carries
+  your Moonraker API key or login token with it.
+
 ## [0.2.0] - 2026-11-01
 
 Your printer's camera comes to the terminal, and AFC printers look the way

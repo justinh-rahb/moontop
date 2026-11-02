@@ -17,7 +17,22 @@ import (
 // Moonraker serves file contents over plain HTTP (/server/files/…),
 // not the websocket.
 
-var httpClient = &http.Client{Timeout: 30 * time.Second}
+var httpClient = &http.Client{Timeout: 30 * time.Second, CheckRedirect: keepCredentialsHome}
+
+// keepCredentialsHome follows redirects (up to 10) but never carries the
+// printer's API key or token to another host. Go drops Authorization on
+// a cross-host redirect by itself, but not a custom header like
+// X-Api-Key.
+func keepCredentialsHome(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return fmt.Errorf("stopped after 10 redirects")
+	}
+	if !strings.EqualFold(req.URL.Host, via[0].URL.Host) {
+		req.Header.Del("X-Api-Key")
+		req.Header.Del("Authorization")
+	}
+	return nil
+}
 
 func (c *Client) fileURL(root, path string) string {
 	segs := strings.Split(path, "/")
@@ -96,7 +111,7 @@ type UploadResult struct {
 
 // uploadClient has no overall timeout: a large file over slow Wi-Fi
 // can take minutes. The dial and response-header waits still time out.
-var uploadClient = &http.Client{Transport: &http.Transport{
+var uploadClient = &http.Client{CheckRedirect: keepCredentialsHome, Transport: &http.Transport{
 	Proxy:                 http.ProxyFromEnvironment,
 	ResponseHeaderTimeout: 10 * time.Minute,
 	TLSHandshakeTimeout:   15 * time.Second,

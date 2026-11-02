@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -101,5 +102,31 @@ func TestRefreshTokenFlow(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if err := c.Reconnect(t.Context()); err != nil {
 		t.Fatalf("reconnect with an expired token: %v", err)
+	}
+}
+
+// A redirect to another host must not carry the API key or token.
+func TestRedirectKeepsCredentialsHome(t *testing.T) {
+	got := make(chan http.Header, 1)
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got <- r.Header.Clone()
+		io.WriteString(w, "x")
+	}))
+	defer elsewhere.Close()
+	srv := moonrakertest.New(t)
+	srv.HandleHTTP("/server/files/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, elsewhere.URL+"/stolen", http.StatusFound)
+	})
+	c, err := moonraker.NewWithCredentials(srv.Host(), moonraker.Credentials{APIKey: "secret", AccessToken: "tok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, _, err := c.FetchFile("config", "printer.cfg", 0); err != nil {
+		t.Fatal(err)
+	}
+	h := <-got
+	if h.Get("X-Api-Key") != "" || h.Get("Authorization") != "" {
+		t.Fatalf("credentials followed the redirect: %v", h)
 	}
 }
