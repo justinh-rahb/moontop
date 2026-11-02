@@ -54,7 +54,7 @@ From an outside review of v0.2.0 ([notes](#review-notes)).
 
 | Item | Notes |
 | --- | --- |
-| **Matrix view** | `m` on the camera tiles every enabled camera at once, each at a smaller decode width. One ffmpeg per live camera, so the 480 rung or snapshots by default. |
+| **Matrix view** | `m` on the camera: Neo vision. The live picture drawn as *The Matrix*'s green code rain — each cell a glyph (half-width katakana, digits, a few Latin letters) whose brightness follows the frame's luminance there, with columns of code falling over it and bright heads on each stream, so the printer shows through the rain. Another rung beside quadrant and half blocks; works in any terminal, no Kitty graphics needed. |
 
 ### 5. Power devices
 
