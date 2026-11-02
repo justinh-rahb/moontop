@@ -9,6 +9,15 @@ Releases are cut from this file: adding a `## [x.y.z] - YYYY-MM-DD` heading on
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-02
+
+Smoother camera, and Moontop remembers your choices. The sharp camera
+picture no longer flickers in Ghostty, setup puts the cursor back where you
+left it, and the camera keeps the picture style you picked with `b`. Also:
+`iframe` cameras like HelixScreen's screen mirror are handled properly, PNG
+and GIF snapshots work, and your API key or login token is no longer
+forwarded when the printer redirects to another host.
+
 ### Changed
 
 - Setup remembers where you were in each category, so going back to a list,
@@ -127,6 +136,7 @@ through Moonraker, covering what you reach for in Mainsail or Fluidd.
 - Builds for Linux, macOS, Windows and FreeBSD on amd64 and arm64 (and armv7
   on Linux), an install script, and `go install`.
 
-[Unreleased]: https://github.com/justinh-rahb/moontop/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/justinh-rahb/moontop/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/justinh-rahb/moontop/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/justinh-rahb/moontop/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/justinh-rahb/moontop/releases/tag/v0.1.0
