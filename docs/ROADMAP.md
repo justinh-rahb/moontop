@@ -77,6 +77,25 @@ Carried over from the gap audit and earlier plans, not scheduled:
 - **Spoolman** and **timelapse** panels.
 - **Firmware retraction** settings in Extruder.
 
+### Possible direction: serial
+
+Not planned, just a direction worth keeping in mind (Nov 5, from a
+Snapmaker Discord chat about Pronterface still being used to diagnose
+boards). `moontop serial /dev/ttyUSB0` would be a Pronterface for the
+terminal: a tethered host for Marlin, RepRapFirmware and Prusa boards
+over USB, reusing the line console.
+
+- First version: the console over serial (line numbers, checksums, waiting
+  for `ok`, `Resend:` and `busy:` handling, `T:` / `B:` reports), a port
+  picker with baud auto-detect, and `moontop gcode -serial`.
+- Later: streaming a gcode file from the computer, and a small dashboard
+  fed by `M105` / `M114` / `M27` polling.
+- Kept as its own mode, not a second backend behind the dashboard, so
+  Moontop stays a Moonraker client first. Klipper MCUs don't speak gcode
+  on their port, so this is for other firmware and pre-flash checks.
+- Pure-Go serial (e.g. `go.bug.st/serial`) to keep builds cgo-free;
+  tested against a fake serial printer, then on real boards.
+
 ## Out of scope
 
 The gcode 3D viewer and file thumbnails, a multi-printer farm view (Moontop is one printer at a time, switched with `P`), drag-and-drop upload, and MMU / Happy Hare and LED-effect panels until someone with the hardware asks.
