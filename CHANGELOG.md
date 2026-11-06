@@ -9,6 +9,17 @@ Releases are cut from this file: adding a `## [x.y.z] - YYYY-MM-DD` heading on
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-06
+
+A maintenance release: updated terminal libraries, with no changes to how
+Moontop looks or works.
+
+### Changed
+
+- Updated `charmbracelet/x/ansi` to 0.11.9, along with the text-width and
+  colour libraries it uses (`go-runewidth`, `displaywidth`, `uax29`,
+  `go-colorful`).
+
 ## [0.2.1] - 2026-11-02
 
 Smoother camera, and Moontop remembers your choices. The sharp camera
@@ -136,7 +147,8 @@ through Moonraker, covering what you reach for in Mainsail or Fluidd.
 - Builds for Linux, macOS, Windows and FreeBSD on amd64 and arm64 (and armv7
   on Linux), an install script, and `go install`.
 
-[Unreleased]: https://github.com/justinh-rahb/moontop/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/justinh-rahb/moontop/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/justinh-rahb/moontop/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/justinh-rahb/moontop/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/justinh-rahb/moontop/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/justinh-rahb/moontop/releases/tag/v0.1.0
